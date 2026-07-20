@@ -1,0 +1,8 @@
+streamlit
+openpyxl
+opencv-python-headless
+numpy
+pillow
+zxing-cpp
+pyzbar
+easyocr
