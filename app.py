@@ -13,7 +13,7 @@ from openpyxl.drawing.image import Image as OpenpyxlImage
 # ==============================================================================
 # ✏️ ÁREA DE CONFIGURAÇÃO FÁCIL (ALTERE AQUI TITULO E DESCRIÇÃO)
 # ==============================================================================
-TITULO_PAGINA = "📊 Preenchedor & Divisor Inteligente de Planilhas"
+TITULO_PAGINA = "📊 Organizador e Divisor de Planilhas com suas fotos"
 DESCRICAO_PAGINA = "Suba o arquivo ZIP contendo as fotos e a planilha Excel para vincular as imagens e realizar a divisão automática das planilhas."
 
 # 🎨 PALETA DE CORES PERSONALIZADA
