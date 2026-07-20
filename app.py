@@ -10,12 +10,109 @@ from PIL import Image
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as OpenpyxlImage
 
-# Configuração da página no Streamlit
+# ==============================================================================
+# ✏️ ÁREA DE CONFIGURAÇÃO FÁCIL (ALTERE AQUI TITULO E DESCRIÇÃO)
+# ==============================================================================
+TITULO_PAGINA = "📊 Preenchedor & Divisor Inteligente de Planilhas"
+DESCRICAO_PAGINA = "Suba o arquivo ZIP contendo as fotos e a planilha Excel para vincular as imagens e realizar a divisão automática das planilhas."
+
+# 🎨 PALETA DE CORES PERSONALIZADA
+COR_GRAFITE = "#2A2927"
+COR_LARANJA = "#F39200"
+COR_FUNDO_CARD = "#333230"
+COR_TEXTO = "#FFFFFF"
+# ==============================================================================
+
+# Configuração Inicial da Página no Streamlit
 st.set_page_config(
-    page_title="Preenchedor & Divisor de Planilhas",
+    page_title=TITULO_PAGINA,
     page_icon="📊",
     layout="wide"
 )
+
+# --- APLICAÇÃO DO CSS CUSTOMIZADO COM SUAS CORES ---
+css_customizado = f"""
+<style>
+    /* Fundo da Página */
+    .stApp {{
+        background-color: {COR_GRAFITE};
+        color: {COR_TEXTO};
+    }}
+
+    /* Estilo dos Cards/Containers */
+    div[data-testid="stVerticalBlock"] > div[data-testid="element-container"] {{
+        color: {COR_TEXTO};
+    }}
+    
+    .css-card {{
+        background-color: {COR_FUNDO_CARD};
+        padding: 20px;
+        border-radius: 10px;
+        border-left: 5px solid {COR_LARANJA};
+        margin-bottom: 20px;
+    }}
+
+    /* Títulos e Subtítulos */
+    h1, h2, h3, h4, h5, h6, p, label, .stMarkdown {{
+        color: {COR_TEXTO} !important;
+    }}
+
+    /* Botão Principal */
+    .stButton > button {{
+        background-color: {COR_LARANJA} !important;
+        color: {COR_TEXTO} !important;
+        border: none !important;
+        font-weight: bold !important;
+        border-radius: 8px !important;
+        transition: 0.3s !important;
+    }}
+    
+    .stButton > button:hover {{
+        background-color: #d88100 !important;
+        box-shadow: 0 4px 12px rgba(243, 146, 0, 0.4);
+    }}
+
+    /* Botão de Download */
+    .stDownloadButton > button {{
+        background-color: {COR_FUNDO_CARD} !important;
+        color: {COR_LARANJA} !important;
+        border: 2px solid {COR_LARANJA} !important;
+        font-weight: bold !important;
+        border-radius: 8px !important;
+    }}
+
+    .stDownloadButton > button:hover {{
+        background-color: {COR_LARANJA} !important;
+        color: {COR_TEXTO} !important;
+    }}
+
+    /* Inputs e Caixas de Texto */
+    input, select {{
+        background-color: {COR_FUNDO_CARD} !important;
+        color: {COR_TEXTO} !important;
+        border: 1px solid {COR_LARANJA} !important;
+    }}
+
+    /* Barra de Progresso */
+    .stProgress > div > div > div > div {{
+        background-color: {COR_LARANJA} !important;
+    }}
+
+    /* Rodapé */
+    .footer {{
+        position: relative;
+        bottom: 0;
+        width: 100%;
+        text-align: center;
+        padding: 20px;
+        margin-top: 50px;
+        border-top: 1px solid {COR_FUNDO_CARD};
+        color: {COR_TEXTO};
+        font-size: 0.9rem;
+    }}
+</style>
+"""
+st.markdown(css_customizado, unsafe_allow_html=True)
 
 # --- MOTORES DE LEITURA ---
 try:
@@ -146,8 +243,9 @@ def criar_cache_da_pasta(caminho_pasta, log_box):
 
 # --- INTERFACE STREAMLIT ---
 
-st.title("📊 Preenchedor & Divisor Inteligente de Planilhas Excel")
-st.markdown("Suba o arquivo ZIP contendo as fotos e a planilha Excel para vincular as imagens e realizar a divisão automática.")
+# Cabeçalho da Aplicação
+st.title(TITULO_PAGINA)
+st.markdown(f"*{DESCRICAO_PAGINA}*")
 
 st.divider()
 
@@ -190,7 +288,6 @@ if st.button("🚀 Iniciar Processamento na Nuvem", type="primary", use_containe
     if not file_zip or not file_excel:
         st.error("Por favor, faça o upload de AMBOS os arquivos (ZIP das fotos e o Excel) antes de continuar!")
     else:
-        # Diretorio temporario de processamento
         temp_dir = "temp_processing"
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
@@ -205,12 +302,10 @@ if st.button("🚀 Iniciar Processamento na Nuvem", type="primary", use_containe
         with open(excel_path, "wb") as f:
             f.write(file_excel.getbuffer())
 
-        # Extrai o ZIP das fotos
         fotos_dir = os.path.join(temp_dir, "fotos_extraidas")
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(fotos_dir)
 
-        # Barra de Progresso e Logs
         progress_bar = st.progress(0)
         status_text = st.empty()
         log_box = st.empty()
@@ -256,10 +351,8 @@ if st.button("🚀 Iniciar Processamento na Nuvem", type="primary", use_containe
             chave_cache = f"{palete}|{codigo}"
 
             if chave_cache not in cache_global:
-                # Procura a pasta correspondente (pode haver subpastas no ZIP)
                 caminho_pasta = os.path.join(fotos_dir, palete, codigo)
                 if not os.path.exists(caminho_pasta):
-                    # Procura em subpastas extras caso o zip tenha sido compactado com pasta raiz
                     for root, dirs, files in os.walk(fotos_dir):
                         if root.endswith(os.path.join(palete, codigo)):
                             caminho_pasta = root
@@ -346,7 +439,6 @@ if st.button("🚀 Iniciar Processamento na Nuvem", type="primary", use_containe
         st.subheader("📥 Baixar Resultados")
 
         # BOTÕES DE DOWNLOAD
-        # 1. Download do Arquivo Completo
         with open(caminho_principal_salvo, "rb") as f:
             st.download_button(
                 label="📄 Baixar Planilha Completa Preenchida (.xlsx)",
@@ -356,7 +448,6 @@ if st.button("🚀 Iniciar Processamento na Nuvem", type="primary", use_containe
                 use_container_width=True
             )
 
-        # 2. Download dos Arquivos Fatiados em ZIP (se houver divisão)
         if arquivos_fatiados:
             zip_fatiados_path = os.path.join(temp_dir, "Planilhas_Divididas.zip")
             with zipfile.ZipFile(zip_fatiados_path, 'w') as zip_f:
@@ -371,3 +462,13 @@ if st.button("🚀 Iniciar Processamento na Nuvem", type="primary", use_containe
                     mime="application/zip",
                     use_container_width=True
                 )
+
+# --- RODAPÉ PERSONALIZADO ---
+st.markdown(
+    f"""
+    <div class="footer">
+        Desenvolvido por <strong>Diego Costa</strong>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
