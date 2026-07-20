@@ -284,7 +284,7 @@ with col_config:
 st.divider()
 
 # Botão Principal
-if st.button("🚀 Iniciar Processamento na Nuvem", type="primary", use_container_width=True):
+if st.button("🚀 Iniciar Processamento", type="primary", use_container_width=True):
     if not file_zip or not file_excel:
         st.error("Por favor, faça o upload de AMBOS os arquivos (ZIP das fotos e o Excel) antes de continuar!")
     else:
