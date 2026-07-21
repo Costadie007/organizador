@@ -11,104 +11,123 @@ from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as OpenpyxlImage
 
 # ==============================================================================
-# ✏️ ÁREA DE CONFIGURAÇÃO FÁCIL (ALTERE AQUI TITULO E DESCRIÇÃO)
+# ✏️ CONFIGURAÇÃO DE TÍTULO, DESCRIÇÃO E LOGO
 # ==============================================================================
-TITULO_PAGINA = "📊 Organizador e Divisor de Planilhas com suas fotos"
-DESCRICAO_PAGINA = "Suba o arquivo ZIP contendo as fotos e a planilha Excel para vincular as imagens e realizar a divisão automática das planilhas."
+TITULO_PAGINA = "Organizador de Planilhas"
+DESCRICAO_PAGINA = "Envie a pasta compactada com as fotos e a planilha Excel para processamento e vinculo automático."
+CAMINHO_LOGO = "logo.png"  # Coloque a imagem logo.png na pasta do projeto (opcional)
 
-# 🎨 PALETA DE CORES PERSONALIZADA
+# 🎨 PALETA DE CORES
 COR_GRAFITE = "#2A2927"
 COR_LARANJA = "#F39200"
 COR_FUNDO_CARD = "#333230"
 COR_TEXTO = "#FFFFFF"
 # ==============================================================================
 
-# Configuração Inicial da Página no Streamlit
+# Configuração da página
 st.set_page_config(
     page_title=TITULO_PAGINA,
     page_icon="📊",
     layout="wide"
 )
 
-# --- APLICAÇÃO DO CSS CUSTOMIZADO COM SUAS CORES ---
+# --- CSS CUSTOMIZADO PARA REPRODUZIR O LAYOUT DO RECORTE ---
 css_customizado = f"""
 <style>
-    /* Fundo da Página */
+    /* Fundo Principal */
     .stApp {{
         background-color: {COR_GRAFITE};
         color: {COR_TEXTO};
     }}
 
-    /* Estilo dos Cards/Containers */
-    div[data-testid="stVerticalBlock"] > div[data-testid="element-container"] {{
-        color: {COR_TEXTO};
-    }}
-    
-    .css-card {{
-        background-color: {COR_FUNDO_CARD};
-        padding: 20px;
-        border-radius: 10px;
-        border-left: 5px solid {COR_LARANJA};
-        margin-bottom: 20px;
+    /* Estilização das Abas (Tabs) */
+    .stTabs [data-baseweb="tab-list"] {{
+        gap: 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     }}
 
-    /* Títulos e Subtítulos */
-    h1, h2, h3, h4, h5, h6, p, label, .stMarkdown {{
+    .stTabs [data-baseweb="tab"] {{
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: transparent;
+        border-radius: 4px 4px 0px 0px;
+        color: {COR_TEXTO};
+        font-weight: 600;
+    }}
+
+    .stTabs [aria-selected="true"] {{
+        border-bottom: 3px solid {COR_LARANJA} !important;
         color: {COR_TEXTO} !important;
     }}
 
-    /* Botão Principal */
+    /* Cards de Estatísticas no Lado Direito */
+    .metric-card {{
+        background-color: {COR_FUNDO_CARD};
+        border-radius: 8px;
+        padding: 20px;
+        text-align: center;
+        margin-bottom: 15px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        box-shadow: 0px 4px 10px rgba(0,0,0,0.2);
+    }}
+
+    .metric-value {{
+        font-size: 2.2rem;
+        font-weight: bold;
+        color: {COR_LARANJA};
+        margin: 0;
+        line-height: 1;
+    }}
+
+    .metric-label {{
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: #A0A0A0;
+        letter-spacing: 1px;
+        margin-top: 8px;
+        text-transform: uppercase;
+    }}
+
+    /* Botão Principal em Laranja */
     .stButton > button {{
         background-color: {COR_LARANJA} !important;
-        color: {COR_TEXTO} !important;
+        color: #FFFFFF !important;
         border: none !important;
         font-weight: bold !important;
-        border-radius: 8px !important;
-        transition: 0.3s !important;
-    }}
-    
-    .stButton > button:hover {{
-        background-color: #d88100 !important;
-        box-shadow: 0 4px 12px rgba(243, 146, 0, 0.4);
+        font-size: 1rem !important;
+        border-radius: 6px !important;
+        padding: 10px 24px !important;
+        transition: all 0.3s ease !important;
     }}
 
-    /* Botão de Download */
+    .stButton > button:hover {{
+        background-color: #d88100 !important;
+        box-shadow: 0 4px 15px rgba(243, 146, 0, 0.4);
+    }}
+
+    /* Botões de Download */
     .stDownloadButton > button {{
         background-color: {COR_FUNDO_CARD} !important;
         color: {COR_LARANJA} !important;
         border: 2px solid {COR_LARANJA} !important;
         font-weight: bold !important;
-        border-radius: 8px !important;
+        border-radius: 6px !important;
     }}
 
     .stDownloadButton > button:hover {{
         background-color: {COR_LARANJA} !important;
-        color: {COR_TEXTO} !important;
+        color: #FFFFFF !important;
     }}
 
-    /* Inputs e Caixas de Texto */
-    input, select {{
-        background-color: {COR_FUNDO_CARD} !important;
-        color: {COR_TEXTO} !important;
-        border: 1px solid {COR_LARANJA} !important;
-    }}
-
-    /* Barra de Progresso */
-    .stProgress > div > div > div > div {{
-        background-color: {COR_LARANJA} !important;
-    }}
-
-    /* Rodapé */
+    /* Rodapé Discreto */
     .footer {{
-        position: relative;
-        bottom: 0;
         width: 100%;
         text-align: center;
-        padding: 20px;
-        margin-top: 50px;
-        border-top: 1px solid {COR_FUNDO_CARD};
-        color: {COR_TEXTO};
-        font-size: 0.9rem;
+        padding: 25px 0px 10px 0px;
+        margin-top: 60px;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        color: #888888;
+        font-size: 0.85rem;
     }}
 </style>
 """
@@ -241,231 +260,288 @@ def criar_cache_da_pasta(caminho_pasta, log_box):
     return cache
 
 
-# --- INTERFACE STREAMLIT ---
+# --- CABEÇALHO (LOGO + TÍTULO ESTILO RECORTE DE ETIQUETAS) ---
+col_logo, col_titulo = st.columns([1, 4])
 
-# Cabeçalho da Aplicação
-st.title(TITULO_PAGINA)
-st.markdown(f"*{DESCRICAO_PAGINA}*")
-
-st.divider()
-
-# Colunas de Upload e Configurações
-col_upload, col_config = st.columns([1, 1])
-
-with col_upload:
-    st.subheader("1. Arquivos de Entrada")
-    file_zip = st.file_uploader("Envie a pasta de fotos (.ZIP)", type=["zip"])
-    file_excel = st.file_uploader("Envie a planilha Excel (.XLSX)", type=["xlsx"])
-
-with col_config:
-    st.subheader("2. Configuração do Excel")
-    nome_aba = st.text_input("Nome da Aba no Excel", value="Modelo de envio em caso de erro")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        col_sgp = st.text_input("Coluna SGP", value="D").upper()
-        col_palete = st.text_input("Coluna Palete", value="B").upper()
-    with col2:
-        col_codigo = st.text_input("Coluna Código", value="A").upper()
-        col_foto = st.text_input("Coluna Destino Foto", value="F").upper()
-
-    st.subheader("3. Regra de Divisão")
-    modo_divisao = st.radio(
-        "Como deseja dividir?",
-        options=["Não dividir (Planilha Única)", "Dividir em N partes", "Dividir a cada N linhas por arquivo"]
-    )
-    
-    valor_divisao = 1
-    if modo_divisao == "Dividir em N partes":
-        valor_divisao = st.number_input("Quantidade de partes desejada:", min_value=2, value=10, step=1)
-    elif modo_divisao == "Dividir a cada N linhas por arquivo":
-        valor_divisao = st.number_input("Quantidade de linhas por planilha:", min_value=1, value=150, step=10)
-
-st.divider()
-
-# Botão Principal
-if st.button("🚀 Iniciar Processamento", type="primary", use_container_width=True):
-    if not file_zip or not file_excel:
-        st.error("Por favor, faça o upload de AMBOS os arquivos (ZIP das fotos e o Excel) antes de continuar!")
+with col_logo:
+    if os.path.exists(CAMINHO_LOGO):
+        st.image(CAMINHO_LOGO, width=160)
     else:
-        temp_dir = "temp_processing"
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
-        os.makedirs(temp_dir)
+        st.markdown(
+            f"""
+            <div style="background-color:{COR_FUNDO_CARD}; padding: 25px; border-radius: 8px; text-align: center; font-weight: bold; font-size: 1.5rem; letter-spacing: 2px;">
+                LOGO
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-        zip_path = os.path.join(temp_dir, "fotos.zip")
-        excel_path = os.path.join(temp_dir, "base.xlsx")
+with col_titulo:
+    st.markdown(f"<h1 style='margin-bottom: 0px;'>{TITULO_PAGINA}</h1>", unsafe_allow_html=True)
+    st.markdown(f"<p style='color: #B0B0B0; margin-top: 5px;'>{DESCRICAO_PAGINA}</p>", unsafe_allow_html=True)
 
-        with open(zip_path, "wb") as f:
-            f.write(file_zip.getbuffer())
+st.markdown("<br>", unsafe_allow_html=True)
 
-        with open(excel_path, "wb") as f:
-            f.write(file_excel.getbuffer())
+# --- ABAS DE NAVEGAÇÃO ---
+tab_ferramenta, tab_admin = st.tabs(["✂️ Ferramenta de Organização", "👑 Painel do Administrador"])
 
-        fotos_dir = os.path.join(temp_dir, "fotos_extraidas")
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(fotos_dir)
+# --- ESTADOS NA SESSÃO PARA CONTRAR FOTOS E DIVISÕES ---
+if "total_fotos_vinculadas" not in st.session_state:
+    st.session_state.total_fotos_vinculadas = 0
+if "total_partes_geradas" not in st.session_state:
+    st.session_state.total_partes_geradas = 0
 
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        log_box = st.empty()
+with tab_ferramenta:
+    # Divisão em Colunas: Lado Esquerdo (Uploads e Opções) / Lado Direito (Painel do Lote)
+    col_esquerda, col_direita = st.columns([2.5, 1])
 
-        status_text.info("Carregando arquivo Excel...")
-        
-        try:
-            wb = load_workbook(excel_path)
-            if nome_aba not in wb.sheetnames:
-                st.error(f"A aba '{nome_aba}' não existe no arquivo Excel!")
-                st.stop()
-            ws = wb[nome_aba]
-        except Exception as e:
-            st.error(f"Erro ao abrir Excel: {e}")
-            st.stop()
+    with col_esquerda:
+        st.markdown("📁 **Selecione ou arraste os arquivos aqui**")
+        file_zip = st.file_uploader("Upload da Pasta de Fotos (.ZIP)", type=["zip"])
+        file_excel = st.file_uploader("Upload da Planilha Excel (.XLSX)", type=["xlsx"])
 
-        cache_global = {}
-        mapa_fotos_por_linha = {}
-        fotos_inseridas = 0
-        total_linhas = ws.max_row - 1
+        st.markdown("<br>", unsafe_allow_html=True)
+        with st.expander("⚙️ Configurações das Colunas e Fatiamento", expanded=False):
+            nome_aba = st.text_input("Nome da Aba no Excel", value="Modelo de envio em caso de erro")
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                col_sgp = st.text_input("Coluna SGP", value="D").upper()
+                col_palete = st.text_input("Coluna Palete", value="B").upper()
+            with c2:
+                col_codigo = st.text_input("Coluna Código", value="A").upper()
+                col_foto = st.text_input("Coluna Destino Foto", value="F").upper()
 
-        if total_linhas <= 0:
-            st.error("Planilha vazia!")
-            st.stop()
-
-        # PROCESSAMENTO DE FOTOS
-        for idx, linha in enumerate(range(2, ws.max_row + 1), start=1):
-            percentual = int((idx / total_linhas) * 70)
-            progress_bar.progress(percentual)
-            status_text.text(f"Processando linha {idx} de {total_linhas}...")
-
-            sgp = ws[f"{col_sgp}{linha}"].value
-            codigo = ws[f"{col_codigo}{linha}"].value
-            palete = ws[f"{col_palete}{linha}"].value
-
-            if sgp is None or codigo is None or palete is None:
-                continue
-
-            sgp = str(sgp).strip().split(".")[0]
-            codigo = str(codigo).strip().split(".")[0]
-            palete = str(palete).strip()
-
-            chave_cache = f"{palete}|{codigo}"
-
-            if chave_cache not in cache_global:
-                caminho_pasta = os.path.join(fotos_dir, palete, codigo)
-                if not os.path.exists(caminho_pasta):
-                    for root, dirs, files in os.walk(fotos_dir):
-                        if root.endswith(os.path.join(palete, codigo)):
-                            caminho_pasta = root
-                            break
-
-                cache_global[chave_cache] = criar_cache_da_pasta(caminho_pasta, log_box)
-
-            cache_pasta = cache_global[chave_cache]
-
-            if sgp in cache_pasta:
-                caminho_foto = cache_pasta[sgp]
-                try:
-                    img = OpenpyxlImage(caminho_foto)
-                    img.width = 120
-                    img.height = 120
-                    ws.row_dimensions[linha].height = 95
-                    ws.add_image(img, f"{col_foto}{linha}")
-
-                    fotos_inseridas += 1
-                    mapa_fotos_por_linha[linha] = caminho_foto
-                except Exception:
-                    pass
-
-        ws.column_dimensions[col_foto].width = 20
-        caminho_principal_salvo = os.path.join(temp_dir, "Planilha_Preenchida.xlsx")
-        wb.save(caminho_principal_salvo)
-
-        # DIVISÃO DA PLANILHA
-        arquivos_fatiados = []
-        if modo_divisao != "Não dividir (Planilha Única)":
-            status_text.text("Realizando fatiamento da planilha...")
-
-            if modo_divisao == "Dividir em N partes":
-                num_partes = int(valor_divisao)
-                linhas_por_parte = math.ceil(total_linhas / num_partes)
-            else:
-                linhas_por_parte = int(valor_divisao)
-                num_partes = math.ceil(total_linhas / linhas_por_parte)
-
-            for i in range(num_partes):
-                dado_inicio = (i * linhas_por_parte) + 1
-                dado_fim = min(total_linhas, (i + 1) * linhas_por_parte)
-
-                if dado_inicio > total_linhas:
-                    break
-
-                linha_orig_inicio = dado_inicio + 1
-                linha_orig_fim = dado_fim + 1
-
-                wb_parte = load_workbook(caminho_principal_salvo)
-                ws_parte = wb_parte[nome_aba]
-                ws_parte._images.clear()
-
-                if ws_parte.max_row > linha_orig_fim:
-                    ws_parte.delete_rows(linha_orig_fim + 1, ws_parte.max_row - linha_orig_fim)
-
-                if linha_orig_inicio > 2:
-                    ws_parte.delete_rows(2, linha_orig_inicio - 2)
-
-                linha_destino = 2
-                for linha_orig in range(linha_orig_inicio, linha_orig_fim + 1):
-                    caminho_foto = mapa_fotos_por_linha.get(linha_orig)
-                    if caminho_foto and os.path.exists(caminho_foto):
-                        try:
-                            img = OpenpyxlImage(caminho_foto)
-                            img.width = 120
-                            img.height = 120
-                            ws_parte.row_dimensions[linha_destino].height = 95
-                            ws_parte.add_image(img, f"{col_foto}{linha_destino}")
-                        except Exception:
-                            pass
-                    linha_destino += 1
-
-                ws_parte.column_dimensions[col_foto].width = 20
-                nome_saida = f"Parte_{i + 1}_(Linhas_{dado_inicio}-{dado_fim}).xlsx"
-                caminho_saida = os.path.join(temp_dir, nome_saida)
-                wb_parte.save(caminho_saida)
-                arquivos_fatiados.append(caminho_saida)
-
-        progress_bar.progress(100)
-        status_text.success(f"🎉 Processamento concluído com sucesso! {fotos_inseridas} fotos inseridas.")
-
-        st.divider()
-        st.subheader("📥 Baixar Resultados")
-
-        # BOTÕES DE DOWNLOAD
-        with open(caminho_principal_salvo, "rb") as f:
-            st.download_button(
-                label="📄 Baixar Planilha Completa Preenchida (.xlsx)",
-                data=f.read(),
-                file_name="Planilha_Preenchida_Completa.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
+            modo_divisao = st.radio(
+                "Regra de Divisão:",
+                options=["Não dividir (Planilha Única)", "Dividir em N partes", "Dividir a cada N linhas por arquivo"]
             )
+            
+            valor_divisao = 1
+            if modo_divisao == "Dividir em N partes":
+                valor_divisao = st.number_input("Quantidade de partes desejada:", min_value=2, value=10, step=1)
+            elif modo_divisao == "Dividir a cada N linhas por arquivo":
+                valor_divisao = st.number_input("Quantidade de linhas por planilha:", min_value=1, value=150, step=10)
 
-        if arquivos_fatiados:
-            zip_fatiados_path = os.path.join(temp_dir, "Planilhas_Divididas.zip")
-            with zipfile.ZipFile(zip_fatiados_path, 'w') as zip_f:
-                for arq in arquivos_fatiados:
-                    zip_f.write(arq, arcname=os.path.basename(arq))
+        st.markdown("<br>", unsafe_allow_html=True)
+        btn_iniciar = st.button("🚀 Iniciar Processamento em Lote", use_container_width=True)
 
-            with open(zip_fatiados_path, "rb") as f:
-                st.download_button(
-                    label="📦 Baixar Todas as Partes Divididas (.ZIP)",
-                    data=f.read(),
-                    file_name="Planilhas_Divididas.zip",
-                    mime="application/zip",
-                    use_container_width=True
-                )
+    with col_direita:
+        st.markdown("### 📊 Painel do Lote")
+        
+        # Card 1: Fotos Carregadas/Vinculadas
+        st.markdown(
+            f"""
+            <div class="metric-card">
+                <div class="metric-value">{st.session_state.total_fotos_vinculadas}</div>
+                <div class="metric-label">Fotos Vinculadas</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-# --- RODAPÉ PERSONALIZADO ---
+        # Card 2: Partes Fatiadas
+        st.markdown(
+            f"""
+            <div class="metric-card">
+                <div class="metric-value">{st.session_state.total_partes_geradas}</div>
+                <div class="metric-label">Partes Geradas</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    # EXECUÇÃO DO PROCESSAMENTO
+    if btn_iniciar:
+        if not file_zip or not file_excel:
+            st.error("Por favor, faça o upload do ZIP de fotos e do Excel antes de iniciar.")
+        else:
+            temp_dir = "temp_processing"
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+            os.makedirs(temp_dir)
+
+            zip_path = os.path.join(temp_dir, "fotos.zip")
+            excel_path = os.path.join(temp_dir, "base.xlsx")
+
+            with open(zip_path, "wb") as f:
+                f.write(file_zip.getbuffer())
+
+            with open(excel_path, "wb") as f:
+                f.write(file_excel.getbuffer())
+
+            fotos_dir = os.path.join(temp_dir, "fotos_extraidas")
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(fotos_dir)
+
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            log_box = st.empty()
+
+            status_text.info("Carregando planilha...")
+            
+            try:
+                wb = load_workbook(excel_path)
+                if nome_aba not in wb.sheetnames:
+                    st.error(f"A aba '{nome_aba}' não existe no Excel!")
+                    st.stop()
+                ws = wb[nome_aba]
+            except Exception as e:
+                st.error(f"Erro ao ler arquivo Excel: {e}")
+                st.stop()
+
+            cache_global = {}
+            mapa_fotos_por_linha = {}
+            fotos_inseridas = 0
+            total_linhas = ws.max_row - 1
+
+            if total_linhas <= 0:
+                st.error("Planilha vazia!")
+                st.stop()
+
+            for idx, linha in enumerate(range(2, ws.max_row + 1), start=1):
+                percentual = int((idx / total_linhas) * 70)
+                progress_bar.progress(percentual)
+                status_text.text(f"Processando linha {idx} de {total_linhas}...")
+
+                sgp = ws[f"{col_sgp}{linha}"].value
+                codigo = ws[f"{col_codigo}{linha}"].value
+                palete = ws[f"{col_palete}{linha}"].value
+
+                if sgp is None or codigo is None or palete is None:
+                    continue
+
+                sgp = str(sgp).strip().split(".")[0]
+                codigo = str(codigo).strip().split(".")[0]
+                palete = str(palete).strip()
+
+                chave_cache = f"{palete}|{codigo}"
+
+                if chave_cache not in cache_global:
+                    caminho_pasta = os.path.join(fotos_dir, palete, codigo)
+                    if not os.path.exists(caminho_pasta):
+                        for root, dirs, files in os.walk(fotos_dir):
+                            if root.endswith(os.path.join(palete, codigo)):
+                                caminho_pasta = root
+                                break
+
+                    cache_global[chave_cache] = criar_cache_da_pasta(caminho_pasta, log_box)
+
+                cache_pasta = cache_global[chave_cache]
+
+                if sgp in cache_pasta:
+                    caminho_foto = cache_pasta[sgp]
+                    try:
+                        img = OpenpyxlImage(caminho_foto)
+                        img.width = 120
+                        img.height = 120
+                        ws.row_dimensions[linha].height = 95
+                        ws.add_image(img, f"{col_foto}{linha}")
+
+                        fotos_inseridas += 1
+                        mapa_fotos_por_linha[linha] = caminho_foto
+                    except Exception:
+                        pass
+
+            ws.column_dimensions[col_foto].width = 20
+            caminho_principal_salvo = os.path.join(temp_dir, "Planilha_Preenchida.xlsx")
+            wb.save(caminho_principal_salvo)
+
+            # FATIAMENTO
+            arquivos_fatiados = []
+            if modo_divisao != "Não dividir (Planilha Única)":
+                status_text.text("Fatiando planilha...")
+
+                if modo_divisao == "Dividir em N partes":
+                    num_partes = int(valor_divisao)
+                    linhas_por_parte = math.ceil(total_linhas / num_partes)
+                else:
+                    linhas_por_parte = int(valor_divisao)
+                    num_partes = math.ceil(total_linhas / linhas_por_parte)
+
+                for i in range(num_partes):
+                    dado_inicio = (i * linhas_por_parte) + 1
+                    dado_fim = min(total_linhas, (i + 1) * linhas_por_parte)
+
+                    if dado_inicio > total_linhas:
+                        break
+
+                    linha_orig_inicio = dado_inicio + 1
+                    linha_orig_fim = dado_fim + 1
+
+                    wb_parte = load_workbook(caminho_principal_salvo)
+                    ws_parte = wb_parte[nome_aba]
+                    ws_parte._images.clear()
+
+                    if ws_parte.max_row > linha_orig_fim:
+                        ws_parte.delete_rows(linha_orig_fim + 1, ws_parte.max_row - linha_orig_fim)
+
+                    if linha_orig_inicio > 2:
+                        ws_parte.delete_rows(2, linha_orig_inicio - 2)
+
+                    linha_destino = 2
+                    for linha_orig in range(linha_orig_inicio, linha_orig_fim + 1):
+                        caminho_foto = mapa_fotos_por_linha.get(linha_orig)
+                        if caminho_foto and os.path.exists(caminho_foto):
+                            try:
+                                img = OpenpyxlImage(caminho_foto)
+                                img.width = 120
+                                img.height = 120
+                                ws_parte.row_dimensions[linha_destino].height = 95
+                                ws_parte.add_image(img, f"{col_foto}{linha_destino}")
+                            except Exception:
+                                pass
+                        linha_destino += 1
+
+                    ws_parte.column_dimensions[col_foto].width = 20
+                    nome_saida = f"Parte_{i + 1}_(Linhas_{dado_inicio}-{dado_fim}).xlsx"
+                    caminho_saida = os.path.join(temp_dir, nome_saida)
+                    wb_parte.save(caminho_saida)
+                    arquivos_fatiados.append(caminho_saida)
+
+            # ATUALIZA CONTADORES DO PAINEL
+            st.session_state.total_fotos_vinculadas = fotos_inseridas
+            st.session_state.total_partes_geradas = len(arquivos_fatiados) if arquivos_fatiados else 1
+
+            progress_bar.progress(100)
+            status_text.success(f"🎉 Concluído com sucesso! {fotos_inseridas} fotos inseridas.")
+
+            # BOTÕES DE DOWNLOAD
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
+                with open(caminho_principal_salvo, "rb") as f:
+                    st.download_button(
+                        label="📄 Baixar Planilha Completa",
+                        data=f.read(),
+                        file_name="Planilha_Preenchida_Completa.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+
+            if arquivos_fatiados:
+                with col_d2:
+                    zip_fatiados_path = os.path.join(temp_dir, "Planilhas_Divididas.zip")
+                    with zipfile.ZipFile(zip_fatiados_path, 'w') as zip_f:
+                        for arq in arquivos_fatiados:
+                            zip_f.write(arq, arcname=os.path.basename(arq))
+
+                    with open(zip_fatiados_path, "rb") as f:
+                        st.download_button(
+                            label="📦 Baixar Partes Divididas (.ZIP)",
+                            data=f.read(),
+                            file_name="Planilhas_Divididas.zip",
+                            mime="application/zip",
+                            use_container_width=True
+                        )
+            st.rerun()
+
+with tab_admin:
+    st.subheader("👑 Painel de Administração")
+    st.info("Aqui você pode acompanhar relatórios de uso ou configurações do servidor.")
+
+# --- RODAPÉ DISCRETO ---
 st.markdown(
-    f"""
+    """
     <div class="footer">
         Desenvolvido por <strong>Diego Costa</strong>
     </div>
