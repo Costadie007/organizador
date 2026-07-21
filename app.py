@@ -45,7 +45,6 @@ def init_db():
             status TEXT NOT NULL
         )
     """)
-    # Criar conta do Admin Mestre Padrão se não existir
     cursor.execute("SELECT * FROM usuarios WHERE usuario = 'diego.costa'")
     if not cursor.fetchone():
         cursor.execute("INSERT INTO usuarios VALUES ('diego.costa', 'admin123', 1, 'Aprovado')")
@@ -57,13 +56,11 @@ init_db()
 # --- CSS CUSTOMIZADO ---
 css_customizado = f"""
 <style>
-    /* Fundo Principal */
     .stApp {{
         background-color: {COR_GRAFITE};
         color: {COR_TEXTO};
     }}
 
-    /* Estilização das Abas */
     .stTabs [data-baseweb="tab-list"] {{
         gap: 10px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.1);
@@ -83,7 +80,6 @@ css_customizado = f"""
         color: {COR_TEXTO} !important;
     }}
 
-    /* Cards de Estatísticas */
     .metric-card {{
         background-color: {COR_FUNDO_CARD};
         border-radius: 8px;
@@ -111,7 +107,6 @@ css_customizado = f"""
         text-transform: uppercase;
     }}
 
-    /* Botão Principal */
     .stButton > button {{
         background-color: {COR_LARANJA} !important;
         color: #FFFFFF !important;
@@ -128,7 +123,6 @@ css_customizado = f"""
         box-shadow: 0 4px 15px rgba(243, 146, 0, 0.4);
     }}
 
-    /* Botões de Download */
     .stDownloadButton > button {{
         background-color: {COR_FUNDO_CARD} !important;
         color: {COR_LARANJA} !important;
@@ -142,7 +136,6 @@ css_customizado = f"""
         color: #FFFFFF !important;
     }}
 
-    /* Card de Login/Cadastro Centralizado */
     .login-box {{
         background-color: {COR_FUNDO_CARD};
         padding: 25px;
@@ -151,7 +144,6 @@ css_customizado = f"""
         box-shadow: 0 10px 25px rgba(0,0,0,0.5);
     }}
 
-    /* Rodapé Discreto */
     .footer {{
         width: 100%;
         text-align: center;
@@ -219,7 +211,7 @@ def realizar_logout():
     st.rerun()
 
 # ==============================================================================
-# 🔐 TELA DE LOGIN E CADASTRO (EXIBIDA SE NÃO ESTIVER LOGADO)
+# 🔐 TELA DE LOGIN E CADASTRO
 # ==============================================================================
 if not st.session_state.logado:
     col_l1, col_l2, col_l3 = st.columns([1, 1.5, 1])
@@ -256,7 +248,7 @@ if not st.session_state.logado:
     st.stop()
 
 # ==============================================================================
-# 🚀 SISTEMA PRINCIPAL (APÓS LOGIN)
+# 🚀 SISTEMA PRINCIPAL
 # ==============================================================================
 
 # --- MOTORES DE LEITURA ---
@@ -369,20 +361,32 @@ def ler_codigo_maxima_precisao(caminho_imagem):
     return tentar_ocr_texto(img_orig)
 
 
-def criar_cache_da_pasta(caminho_pasta, log_box):
+# --- MAPEAMENTO GERAL COM VALIDAÇÃO RIGOROSA ---
+def mapear_todas_as_fotos(diretorio_raiz, status_text):
     cache = {}
-    if not os.path.exists(caminho_pasta):
-        return cache
+    tot_fotos = 0
 
-    for arquivo in os.listdir(caminho_pasta):
-        if not arquivo.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".webp")):
-            continue
-        caminho_foto = os.path.join(caminho_pasta, arquivo)
-        codigo = ler_codigo_maxima_precisao(caminho_foto)
-        if codigo:
-            cache[codigo] = caminho_foto
-            log_box.text(f"  ✓ [{codigo}] -> {arquivo}")
-    return cache
+    for root, _, files in os.walk(diretorio_raiz):
+        for arquivo in files:
+            if arquivo.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".webp")):
+                caminho_foto = os.path.join(root, arquivo)
+                tot_fotos += 1
+                status_text.text(f"Analisando foto {tot_fotos}: {arquivo}...")
+
+                # 1. Tenta ler via Código de Barras / OCR
+                codigo = ler_codigo_maxima_precisao(caminho_foto)
+
+                # 2. FALLBACK RIGOROSO:
+                # Usa o nome do arquivo APENAS se tiver EXATAMENTE 8 DÍGITOS NUMÉRICOS
+                if not codigo:
+                    nome_sem_ext = os.path.splitext(arquivo)[0].strip()
+                    if len(nome_sem_ext) == 8 and nome_sem_ext.isdigit():
+                        codigo = nome_sem_ext
+
+                if codigo:
+                    cache[codigo] = caminho_foto
+
+    return cache, tot_fotos
 
 
 # --- CABEÇALHO ---
@@ -439,11 +443,9 @@ with tab_ferramenta:
             
             c1, c2 = st.columns(2)
             with c1:
-                col_sgp = st.text_input("Coluna SGP", value="D").upper()
-                col_palete = st.text_input("Coluna Palete", value="B").upper()
+                col_sgp = st.text_input("Coluna do Código/SGP", value="D").upper()
             with c2:
-                col_codigo = st.text_input("Coluna Código", value="A").upper()
-                col_foto = st.text_input("Coluna Destino Foto", value="F").upper()
+                col_foto = st.text_input("Coluna Destino da Foto", value="F").upper()
 
             modo_divisao = st.radio(
                 "Regra de Divisão:",
@@ -507,10 +509,13 @@ with tab_ferramenta:
 
             progress_bar = st.progress(0)
             status_text = st.empty()
-            log_box = st.empty()
 
-            status_text.info("Carregando planilha...")
-            
+            # MAPEAR TODAS AS FOTOS NO ZIP
+            status_text.info("Mapeando imagens extraídas...")
+            mapa_fotos, total_encontradas = mapear_todas_as_fotos(fotos_dir, status_text)
+            st.write(f"🔍 Total de arquivos de imagem encontrados: **{total_encontradas}**")
+
+            status_text.info("Carregando planilha Excel...")
             try:
                 wb = load_workbook(excel_path)
                 if nome_aba not in wb.sheetnames:
@@ -521,7 +526,6 @@ with tab_ferramenta:
                 st.error(f"Erro ao ler arquivo Excel: {e}")
                 st.stop()
 
-            cache_global = {}
             mapa_fotos_por_linha = {}
             fotos_inseridas = 0
             total_linhas = ws.max_row - 1
@@ -533,35 +537,16 @@ with tab_ferramenta:
             for idx, linha in enumerate(range(2, ws.max_row + 1), start=1):
                 percentual = int((idx / total_linhas) * 70)
                 progress_bar.progress(percentual)
-                status_text.text(f"Processando linha {idx} de {total_linhas}...")
+                status_text.text(f"Vinculando fotos no Excel (Linha {idx} de {total_linhas})...")
 
                 sgp = ws[f"{col_sgp}{linha}"].value
-                codigo = ws[f"{col_codigo}{linha}"].value
-                palete = ws[f"{col_palete}{linha}"].value
-
-                if sgp is None or codigo is None or palete is None:
+                if sgp is None:
                     continue
 
-                sgp = str(sgp).strip().split(".")[0]
-                codigo = str(codigo).strip().split(".")[0]
-                palete = str(palete).strip()
+                sgp_limpo = limpar_texto_codigo(str(sgp).strip().split(".")[0])
 
-                chave_cache = f"{palete}|{codigo}"
-
-                if chave_cache not in cache_global:
-                    caminho_pasta = os.path.join(fotos_dir, palete, codigo)
-                    if not os.path.exists(caminho_pasta):
-                        for root, dirs, files in os.walk(fotos_dir):
-                            if root.endswith(os.path.join(palete, codigo)):
-                                caminho_pasta = root
-                                break
-
-                    cache_global[chave_cache] = criar_cache_da_pasta(caminho_pasta, log_box)
-
-                cache_pasta = cache_global[chave_cache]
-
-                if sgp in cache_pasta:
-                    caminho_foto = cache_pasta[sgp]
+                if sgp_limpo in mapa_fotos:
+                    caminho_foto = mapa_fotos[sgp_limpo]
                     try:
                         img = OpenpyxlImage(caminho_foto)
                         img.width = 120
@@ -665,7 +650,7 @@ with tab_ferramenta:
                         )
             st.rerun()
 
-# --- 👑 PAINEL DO ADMINISTRADOR (APROVAÇÃO E GERENCIAMENTO DE USUÁRIOS) ---
+# --- 👑 PAINEL DO ADMINISTRADOR ---
 if tab_admin is not None:
     with tab_admin:
         st.subheader("👑 Gerenciamento de Usuários e Aprovações")
@@ -674,7 +659,6 @@ if tab_admin is not None:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
 
-        # 1. SOLICITAÇÕES PENDENTES
         cursor.execute("SELECT usuario FROM usuarios WHERE status = 'Pendente'")
         pendentes = cursor.fetchall()
 
@@ -700,15 +684,12 @@ if tab_admin is not None:
 
         st.markdown("<br>---<br>", unsafe_allow_html=True)
 
-        # 2. LISTA TOTAL DE CONTAS CONECTADAS
         st.write("### 👥 Gerenciar Todas as Contas Cadastradas")
         cursor.execute("SELECT usuario, is_admin, status FROM usuarios")
         todos_usuarios = cursor.fetchall()
 
         for u_info in todos_usuarios:
             usr_nome, usr_admin, usr_status = u_info
-            
-            # Não permitir alterar a conta mestre "diego.costa" por segurança
             e_mestre = (usr_nome == "diego.costa")
 
             col_nome, col_permissao, col_status, col_acao = st.columns([2, 1.5, 1.5, 1])
