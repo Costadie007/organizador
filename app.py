@@ -4,6 +4,7 @@ import re
 import math
 import zipfile
 import shutil
+import sqlite3
 import cv2
 import numpy as np
 from PIL import Image
@@ -11,11 +12,11 @@ from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as OpenpyxlImage
 
 # ==============================================================================
-# ✏️ CONFIGURAÇÃO DE TÍTULO, DESCRIÇÃO E LOGO
+# ✏️ CONFIGURAÇÕES DA PÁGINA
 # ==============================================================================
 TITULO_PAGINA = "Organizador de Planilhas"
-DESCRICAO_PAGINA = "Envie a pasta compactada com as fotos e a planilha Excel para processamento e vinculo automático."
-CAMINHO_LOGO = "logo.png"  # Coloque a imagem logo.png na pasta do projeto (opcional)
+DESCRICAO_PAGINA = "Envie a pasta compactada com as fotos e a planilha Excel para processamento e vínculo automático."
+CAMINHO_LOGO = "logo.png"
 
 # 🎨 PALETA DE CORES
 COR_GRAFITE = "#2A2927"
@@ -24,14 +25,36 @@ COR_FUNDO_CARD = "#333230"
 COR_TEXTO = "#FFFFFF"
 # ==============================================================================
 
-# Configuração da página
 st.set_page_config(
     page_title=TITULO_PAGINA,
     page_icon="📊",
     layout="wide"
 )
 
-# --- CSS CUSTOMIZADO PARA REPRODUZIR O LAYOUT DO RECORTE ---
+# --- BANCO DE DADOS (SQLITE) ---
+DB_NAME = "usuarios.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            usuario TEXT PRIMARY KEY,
+            senha TEXT NOT NULL,
+            is_admin INTEGER NOT NULL,
+            status TEXT NOT NULL
+        )
+    """)
+    # Criar conta do Admin Mestre Padrão se não existir
+    cursor.execute("SELECT * FROM usuarios WHERE usuario = 'diego.costa'")
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO usuarios VALUES ('diego.costa', 'admin123', 1, 'Aprovado')")
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# --- CSS CUSTOMIZADO ---
 css_customizado = f"""
 <style>
     /* Fundo Principal */
@@ -40,7 +63,7 @@ css_customizado = f"""
         color: {COR_TEXTO};
     }}
 
-    /* Estilização das Abas (Tabs) */
+    /* Estilização das Abas */
     .stTabs [data-baseweb="tab-list"] {{
         gap: 10px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.1);
@@ -60,7 +83,7 @@ css_customizado = f"""
         color: {COR_TEXTO} !important;
     }}
 
-    /* Cards de Estatísticas no Lado Direito */
+    /* Cards de Estatísticas */
     .metric-card {{
         background-color: {COR_FUNDO_CARD};
         border-radius: 8px;
@@ -88,7 +111,7 @@ css_customizado = f"""
         text-transform: uppercase;
     }}
 
-    /* Botão Principal em Laranja */
+    /* Botão Principal */
     .stButton > button {{
         background-color: {COR_LARANJA} !important;
         color: #FFFFFF !important;
@@ -119,6 +142,15 @@ css_customizado = f"""
         color: #FFFFFF !important;
     }}
 
+    /* Card de Login/Cadastro Centralizado */
+    .login-box {{
+        background-color: {COR_FUNDO_CARD};
+        padding: 25px;
+        border-radius: 10px;
+        border-top: 4px solid {COR_LARANJA};
+        box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    }}
+
     /* Rodapé Discreto */
     .footer {{
         width: 100%;
@@ -132,6 +164,100 @@ css_customizado = f"""
 </style>
 """
 st.markdown(css_customizado, unsafe_allow_html=True)
+
+# --- GERENCIAMENTO DE SESSÃO / LOGIN ---
+if "logado" not in st.session_state:
+    st.session_state.logado = False
+if "usuario_atual" not in st.session_state:
+    st.session_state.usuario_atual = ""
+if "e_admin" not in st.session_state:
+    st.session_state.e_admin = False
+
+def autenticar(user, pwd):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT usuario, senha, is_admin, status FROM usuarios WHERE usuario = ?", (user,))
+    dados = cursor.fetchone()
+    conn.close()
+
+    if dados:
+        u, p, is_admin, status = dados
+        if p == pwd:
+            if status == "Pendente":
+                st.warning("⏳ Sua conta ainda está aguardando aprovação pelo Administrador.")
+            elif status == "Rejeitado":
+                st.error("❌ Sua solicitação de conta foi rejeitada.")
+            elif status == "Aprovado":
+                st.session_state.logado = True
+                st.session_state.usuario_atual = u
+                st.session_state.e_admin = bool(is_admin)
+                st.rerun()
+        else:
+            st.error("Senha incorreta.")
+    else:
+        st.error("Usuário não encontrado.")
+
+def cadastrar_usuario(user, pwd):
+    if not user or not pwd:
+        st.error("Preencha usuário e senha!")
+        return
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("INSERT INTO usuarios VALUES (?, ?, 0, 'Pendente')", (user, pwd))
+        conn.commit()
+        st.success("✅ Cadastro solicitado! Aguarde a aprovação do Administrador para acessar.")
+    except sqlite3.IntegrityError:
+        st.error("Usuário já existe. Escolha outro nome de usuário.")
+    finally:
+        conn.close()
+
+def realizar_logout():
+    st.session_state.logado = False
+    st.session_state.usuario_atual = ""
+    st.session_state.e_admin = False
+    st.rerun()
+
+# ==============================================================================
+# 🔐 TELA DE LOGIN E CADASTRO (EXIBIDA SE NÃO ESTIVER LOGADO)
+# ==============================================================================
+if not st.session_state.logado:
+    col_l1, col_l2, col_l3 = st.columns([1, 1.5, 1])
+    with col_l2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        tab_entrar, tab_cadastrar = st.tabs(["🔑 Entrar", "📝 Criar Conta"])
+        
+        with tab_entrar:
+            st.markdown("<div class='login-box'>", unsafe_allow_html=True)
+            user_input = st.text_input("Usuário", key="login_user")
+            pwd_input = st.text_input("Senha", type="password", key="login_pwd")
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("Entrar", use_container_width=True):
+                autenticar(user_input, pwd_input)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        with tab_cadastrar:
+            st.markdown("<div class='login-box'>", unsafe_allow_html=True)
+            novo_user = st.text_input("Escolha um Usuário", key="cad_user")
+            nova_pwd = st.text_input("Escolha uma Senha", type="password", key="cad_pwd")
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("Solicitar Cadastro", use_container_width=True):
+                cadastrar_usuario(novo_user, nova_pwd)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown(
+        """
+        <div class="footer">
+            Desenvolvido por <strong>Diego Costa</strong>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    st.stop()
+
+# ==============================================================================
+# 🚀 SISTEMA PRINCIPAL (APÓS LOGIN)
+# ==============================================================================
 
 # --- MOTORES DE LEITURA ---
 try:
@@ -156,7 +282,6 @@ def carregar_ocr():
 OCR_READER = carregar_ocr()
 
 # --- FUNÇÕES DE PROCESSAMENTO ---
-
 def limpar_texto_codigo(codigo_bruto):
     if not codigo_bruto:
         return None
@@ -260,16 +385,16 @@ def criar_cache_da_pasta(caminho_pasta, log_box):
     return cache
 
 
-# --- CABEÇALHO (LOGO + TÍTULO ESTILO RECORTE DE ETIQUETAS) ---
-col_logo, col_titulo = st.columns([1, 4])
+# --- CABEÇALHO ---
+col_logo, col_titulo, col_user = st.columns([1, 3.5, 1])
 
 with col_logo:
     if os.path.exists(CAMINHO_LOGO):
-        st.image(CAMINHO_LOGO, width=160)
+        st.image(CAMINHO_LOGO, width=150)
     else:
         st.markdown(
             f"""
-            <div style="background-color:{COR_FUNDO_CARD}; padding: 25px; border-radius: 8px; text-align: center; font-weight: bold; font-size: 1.5rem; letter-spacing: 2px;">
+            <div style="background-color:{COR_FUNDO_CARD}; padding: 20px; border-radius: 8px; text-align: center; font-weight: bold; font-size: 1.3rem;">
                 LOGO
             </div>
             """,
@@ -280,19 +405,27 @@ with col_titulo:
     st.markdown(f"<h1 style='margin-bottom: 0px;'>{TITULO_PAGINA}</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='color: #B0B0B0; margin-top: 5px;'>{DESCRICAO_PAGINA}</p>", unsafe_allow_html=True)
 
+with col_user:
+    st.write(f"👤 **{st.session_state.usuario_atual}**")
+    if st.button("🚪 Sair", key="btn_logout"):
+        realizar_logout()
+
 st.markdown("<br>", unsafe_allow_html=True)
 
 # --- ABAS DE NAVEGAÇÃO ---
-tab_ferramenta, tab_admin = st.tabs(["✂️ Ferramenta de Organização", "👑 Painel do Administrador"])
+if st.session_state.e_admin:
+    tab_ferramenta, tab_admin = st.tabs(["✂️ Ferramenta de Organização", "👑 Painel do Administrador"])
+else:
+    tab_ferramenta, = st.tabs(["✂️ Ferramenta de Organização"])
+    tab_admin = None
 
-# --- ESTADOS NA SESSÃO PARA CONTRAR FOTOS E DIVISÕES ---
+# --- ESTADOS NA SESSÃO ---
 if "total_fotos_vinculadas" not in st.session_state:
     st.session_state.total_fotos_vinculadas = 0
 if "total_partes_geradas" not in st.session_state:
     st.session_state.total_partes_geradas = 0
 
 with tab_ferramenta:
-    # Divisão em Colunas: Lado Esquerdo (Uploads e Opções) / Lado Direito (Painel do Lote)
     col_esquerda, col_direita = st.columns([2.5, 1])
 
     with col_esquerda:
@@ -329,7 +462,6 @@ with tab_ferramenta:
     with col_direita:
         st.markdown("### 📊 Painel do Lote")
         
-        # Card 1: Fotos Carregadas/Vinculadas
         st.markdown(
             f"""
             <div class="metric-card">
@@ -340,7 +472,6 @@ with tab_ferramenta:
             unsafe_allow_html=True
         )
 
-        # Card 2: Partes Fatiadas
         st.markdown(
             f"""
             <div class="metric-card">
@@ -499,7 +630,6 @@ with tab_ferramenta:
                     wb_parte.save(caminho_saida)
                     arquivos_fatiados.append(caminho_saida)
 
-            # ATUALIZA CONTADORES DO PAINEL
             st.session_state.total_fotos_vinculadas = fotos_inseridas
             st.session_state.total_partes_geradas = len(arquivos_fatiados) if arquivos_fatiados else 1
 
@@ -535,11 +665,98 @@ with tab_ferramenta:
                         )
             st.rerun()
 
-with tab_admin:
-    st.subheader("👑 Painel de Administração")
-    st.info("Aqui você pode acompanhar relatórios de uso ou configurações do servidor.")
+# --- 👑 PAINEL DO ADMINISTRADOR (APROVAÇÃO E GERENCIAMENTO DE USUÁRIOS) ---
+if tab_admin is not None:
+    with tab_admin:
+        st.subheader("👑 Gerenciamento de Usuários e Aprovações")
+        st.markdown("---")
 
-# --- RODAPÉ DISCRETO ---
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+
+        # 1. SOLICITAÇÕES PENDENTES
+        cursor.execute("SELECT usuario FROM usuarios WHERE status = 'Pendente'")
+        pendentes = cursor.fetchall()
+
+        st.write(f"### ⏳ Solicitantes Aguardando Aprovação ({len(pendentes)})")
+        if not pendentes:
+            st.info("Nenhuma solicitação pendente no momento.")
+        else:
+            for p in pendentes:
+                usr = p[0]
+                c_u, c_sim, c_nao = st.columns([3, 1, 1])
+                with c_u:
+                    st.write(f"👤 **{usr}**")
+                with c_sim:
+                    if st.button(f"✅ Aprovar", key=f"ap_{usr}"):
+                        cursor.execute("UPDATE usuarios SET status = 'Aprovado' WHERE usuario = ?", (usr,))
+                        conn.commit()
+                        st.rerun()
+                with c_nao:
+                    if st.button(f"❌ Rejeitar", key=f"rej_{usr}"):
+                        cursor.execute("UPDATE usuarios SET status = 'Rejeitado' WHERE usuario = ?", (usr,))
+                        conn.commit()
+                        st.rerun()
+
+        st.markdown("<br>---<br>", unsafe_allow_html=True)
+
+        # 2. LISTA TOTAL DE CONTAS CONECTADAS
+        st.write("### 👥 Gerenciar Todas as Contas Cadastradas")
+        cursor.execute("SELECT usuario, is_admin, status FROM usuarios")
+        todos_usuarios = cursor.fetchall()
+
+        for u_info in todos_usuarios:
+            usr_nome, usr_admin, usr_status = u_info
+            
+            # Não permitir alterar a conta mestre "diego.costa" por segurança
+            e_mestre = (usr_nome == "diego.costa")
+
+            col_nome, col_permissao, col_status, col_acao = st.columns([2, 1.5, 1.5, 1])
+
+            with col_nome:
+                st.write(f"**{usr_nome}** {'👑 (Mestre)' if e_mestre else ''}")
+
+            with col_permissao:
+                if e_mestre:
+                    st.write("Administrador")
+                else:
+                    novo_papel = st.selectbox(
+                        "Tipo",
+                        options=["Usuário Padrão", "Administrador"],
+                        index=1 if usr_admin else 0,
+                        key=f"role_{usr_nome}"
+                    )
+                    is_adm_val = 1 if novo_papel == "Administrador" else 0
+                    if is_adm_val != usr_admin:
+                        cursor.execute("UPDATE usuarios SET is_admin = ? WHERE usuario = ?", (is_adm_val, usr_nome))
+                        conn.commit()
+                        st.rerun()
+
+            with col_status:
+                if e_mestre:
+                    st.write("🟢 Aprovado")
+                else:
+                    novo_status = st.selectbox(
+                        "Status",
+                        options=["Aprovado", "Pendente", "Rejeitado"],
+                        index=["Aprovado", "Pendente", "Rejeitado"].index(usr_status),
+                        key=f"status_{usr_nome}"
+                    )
+                    if novo_status != usr_status:
+                        cursor.execute("UPDATE usuarios SET status = ? WHERE usuario = ?", (novo_status, usr_nome))
+                        conn.commit()
+                        st.rerun()
+
+            with col_acao:
+                if not e_mestre:
+                    if st.button("🗑️", key=f"del_{usr_nome}"):
+                        cursor.execute("DELETE FROM usuarios WHERE usuario = ?", (usr_nome,))
+                        conn.commit()
+                        st.rerun()
+
+        conn.close()
+
+# --- RODAPÉ ---
 st.markdown(
     """
     <div class="footer">
