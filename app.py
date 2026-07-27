@@ -194,9 +194,6 @@ else:
 
 # --- FUNÇÃO AVANÇADA DE LEITURA DE CÓDIGO DE BARRAS ---
 def extrair_codigos_imagem_avancado(cv_img):
-    """
-    Tenta ler o código de barras aplicando vários pré-processamentos e rotações na foto.
-    """
     codigos_encontrados = set()
 
     def ler_zxing(img):
@@ -210,13 +207,13 @@ def extrair_codigos_imagem_avancado(cv_img):
     if codigos_encontrados:
         return list(codigos_encontrados)
 
-    # Convertendo para Escala de Cinza
+    # 2. Escala de Cinza
     gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY) if len(cv_img.shape) == 3 else cv_img
     ler_zxing(gray)
     if codigos_encontrados:
         return list(codigos_encontrados)
 
-    # 2. Redimensionar se for muito grande (Fotos de celular > 3000px às vezes falham)
+    # 3. Redimensionar se for muito grande (Fotos pesadas)
     h, w = gray.shape[:2]
     if max(h, w) > 1800:
         escala = 1800.0 / max(h, w)
@@ -225,20 +222,20 @@ def extrair_codigos_imagem_avancado(cv_img):
         if codigos_encontrados:
             return list(codigos_encontrados)
 
-    # 3. Tratamento de Contraste (CLAHE)
+    # 4. Tratamento de Contraste (CLAHE)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
     gray_contrast = clahe.apply(gray)
     ler_zxing(gray_contrast)
     if codigos_encontrados:
         return list(codigos_encontrados)
 
-    # 4. Binarização / Otsu (Ótimo para fotos com sombras)
+    # 5. Binarização / Otsu (Remoção de sombras)
     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     ler_zxing(thresh)
     if codigos_encontrados:
         return list(codigos_encontrados)
 
-    # 5. Tentativa com Rotações (90, 180 e 270 graus)
+    # 6. Tentativa com Rotações (90, 180 e 270 graus)
     for rot in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_180, cv2.ROTATE_90_COUNTERCLOCKWISE]:
         rot_img = cv2.rotate(gray, rot)
         ler_zxing(rot_img)
@@ -311,12 +308,16 @@ with tab_ferramenta:
                 cv_img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
                 
                 if cv_img is not None:
-                    # Executa função com múltiplos filtros e rotações
                     codigos_lidos = extrair_codigos_imagem_avancado(cv_img)
                     
                     if codigos_lidos:
                         for cod in codigos_lidos:
-                            mapa_codigo_imagem[str(cod)] = pil_img
+                            # Trata texto e pega APENAS OS ÚLTIMOS 9 DÍGITOS
+                            cod_bruto = str(cod).strip().split('.')[0]
+                            cod_numerico = ''.join(filter(str.isdigit, cod_bruto))
+                            cod_9_digitos = cod_numerico[-9:] if len(cod_numerico) >= 9 else cod_numerico.zfill(9)
+                            
+                            mapa_codigo_imagem[cod_9_digitos] = pil_img
                     else:
                         nao_identificados += 1
                 else:
@@ -324,7 +325,7 @@ with tab_ferramenta:
 
                 progresso.progress((idx + 1) / len(lista_fotos_processar) * 0.5)
 
-            status.write(f"✅ **{len(mapa_codigo_imagem)}** código(s) identificado(s)! ({nao_identificados} fotos não identificadas)")
+            status.write(f"✅ **{len(mapa_codigo_imagem)}** código(s) de 9 dígitos mapeado(s) nas fotos! ({nao_identificados} fotos sem leitura)")
 
             # 2. Carregar Excel e Inserir Fotos
             wb = openpyxl.load_workbook(arquivo_excel)
@@ -332,27 +333,42 @@ with tab_ferramenta:
 
             col_idx_codigo = None
             for col in range(1, ws.max_column + 1):
-                if str(ws.cell(row=1, column=col).value).strip() == str(coluna_codigo).strip():
+                val_cabecalho = str(ws.cell(row=1, column=col).value or "").strip()
+                if val_cabecalho == str(coluna_codigo).strip():
                     col_idx_codigo = col
                     break
+
+            if not col_idx_codigo:
+                st.error(f"❌ Não foi possível localizar a coluna '{coluna_codigo}' na planilha.")
+                st.stop()
 
             col_idx_foto = ws.max_column + 1
             ws.cell(row=1, column=col_idx_foto).value = nome_coluna_foto
 
             vincularam = 0
             tot_rows = ws.max_row
+            
+            codigos_excel_debug = []
 
             for row in range(2, tot_rows + 1):
-                valor_celula = str(ws.cell(row=row, column=col_idx_codigo).value).strip()
+                raw_val = ws.cell(row=row, column=col_idx_codigo).value
+                if raw_val is None:
+                    continue
                 
-                # Se o valor for formatado como float (ex: 12345.0), limpa
-                if valor_celula.endswith(".0"):
-                    valor_celula = valor_celula[:-2]
+                # Trata o valor do Excel e extrai APENAS OS ÚLTIMOS 9 DÍGITOS
+                val_bruto = str(raw_val).strip().split('.')[0]
+                val_numerico = ''.join(filter(str.isdigit, val_bruto))
+                
+                if not val_numerico:
+                    continue
 
-                if valor_celula in mapa_codigo_imagem:
-                    pil_img = mapa_codigo_imagem[valor_celula].copy()
+                codigo_excel_9 = val_numerico[-9:] if len(val_numerico) >= 9 else val_numerico.zfill(9)
+                codigos_excel_debug.append(codigo_excel_9)
+
+                # Cruzamento das chaves de 9 dígitos
+                if codigo_excel_9 in mapa_codigo_imagem:
+                    pil_img = mapa_codigo_imagem[codigo_excel_9].copy()
                     
-                    # Redimensiona mantendo proporção
                     pil_img.thumbnail((130, 80))
                     
                     img_byte_arr = io.BytesIO()
@@ -374,15 +390,22 @@ with tab_ferramenta:
             wb.save(output_excel)
             output_excel.seek(0)
 
-            status.success(f"🎉 Processamento concluído! **{vincularam}** fotos foram vinculadas com sucesso!")
-
-            st.download_button(
-                label="📥 BAIXAR PLANILHA ATUALIZADA COM AS FOTOS",
-                data=output_excel,
-                file_name="Planilha_Com_Fotos.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
+            if vincularam > 0:
+                status.success(f"🎉 Processamento concluído! **{vincularam}** fotos foram vinculadas com sucesso!")
+                st.download_button(
+                    label="📥 BAIXAR PLANILHA ATUALIZADA COM AS FOTOS",
+                    data=output_excel,
+                    file_name="Planilha_Com_Fotos.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+            else:
+                status.warning("⚠️ Nenhuma foto foi vinculada! Veja os códigos de 9 dígitos lidos abaixo para diagnosticar:")
+                col_dbg1, col_dbg2 = st.columns(2)
+                with col_dbg1:
+                    st.write("**Chaves lidas nas Fotos (9 dígitos):**", list(mapa_codigo_imagem.keys()))
+                with col_dbg2:
+                    st.write("**Chaves lidas no Excel (Primeiros 10 registros):**", codigos_excel_debug[:10])
 
 # ==========================================
 # ABA 2: PAINEL DE ADMIN
