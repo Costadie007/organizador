@@ -275,8 +275,8 @@ with col_logo:
 
 with col_titulo:
     st.markdown("""
-        <h1 style="margin:0; font-size: 32px;">Organizador de Planilhas Pro Ultra</h1>
-        <p style="margin:0; color:#bbbbbb !important;">SaaS Profissional: Visão Computacional, Reconhecimento Inteligente e Gestão de Acessos.</p>
+        <h1 style="margin:0; font-size: 32px;">Organizador de Planilhas </h1>
+        <p style="margin:0; color:#bbbbbb !important;">:Anexe suas fotos e sua planilha abaixo e ela será preenchida automaticamente, com divisor de planilhas integrado.</p>
     """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
