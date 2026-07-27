@@ -202,18 +202,15 @@ def extrair_codigos_imagem_avancado(cv_img):
             if r.valid and r.text:
                 codigos_encontrados.add(r.text.strip())
 
-    # 1. Tentativa Direta na Imagem Original
     ler_zxing(cv_img)
     if codigos_encontrados:
         return list(codigos_encontrados)
 
-    # 2. Escala de Cinza
     gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY) if len(cv_img.shape) == 3 else cv_img
     ler_zxing(gray)
     if codigos_encontrados:
         return list(codigos_encontrados)
 
-    # 3. Redimensionar se for muito grande
     h, w = gray.shape[:2]
     if max(h, w) > 1800:
         escala = 1800.0 / max(h, w)
@@ -222,20 +219,17 @@ def extrair_codigos_imagem_avancado(cv_img):
         if codigos_encontrados:
             return list(codigos_encontrados)
 
-    # 4. Tratamento de Contraste (CLAHE)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
     gray_contrast = clahe.apply(gray)
     ler_zxing(gray_contrast)
     if codigos_encontrados:
         return list(codigos_encontrados)
 
-    # 5. Binarização / Otsu
     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     ler_zxing(thresh)
     if codigos_encontrados:
         return list(codigos_encontrados)
 
-    # 6. Tentativa com Rotações (90, 180 e 270 graus)
     for rot in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_180, cv2.ROTATE_90_COUNTERCLOCKWISE]:
         rot_img = cv2.rotate(gray, rot)
         ler_zxing(rot_img)
@@ -243,6 +237,16 @@ def extrair_codigos_imagem_avancado(cv_img):
             return list(codigos_encontrados)
 
     return list(codigos_encontrados)
+
+# HELPER: TRATA O CÓDIGO PARA OS ÚLTIMOS 9 DÍGITOS
+def normalizar_codigo_9_digitos(val_raw):
+    if val_raw is None:
+        return ""
+    val_bruto = str(val_raw).strip().split('.')[0]
+    val_numerico = ''.join(filter(str.isdigit, val_bruto))
+    if not val_numerico:
+        return ""
+    return val_numerico[-9:] if len(val_numerico) >= 9 else val_numerico.zfill(9)
 
 
 # ==========================================
@@ -276,15 +280,13 @@ with tab_ferramenta:
         with col_destino:
             nome_coluna_foto = st.text_input("Nome da nova coluna para INSERIR A FOTO:", value="FOTO")
 
-        if st.button("🚀 INICIAR VÍNCULO DE FOTOS E PLANILHA", use_container_width=True):
-            st.markdown("---")
-            progresso = st.progress(0)
-            status = st.empty()
+        # Botão principal de varredura
+        if st.button("🚀 INICIAR LEITURA DAS FOTOS", use_container_width=True):
+            st.session_state.mapa_codigo_imagem = {}
+            st.session_state.fotos_pendentes = []
 
-            # 1. Processar e Extrair Fotos
+            # 1. Carregar fotos
             lista_fotos_processar = []
-
-            status.write("📂 Extraindo pacote de imagens...")
             for f in arquivos_fotos:
                 if f.name.endswith(".zip"):
                     with zipfile.ZipFile(f) as z:
@@ -292,18 +294,17 @@ with tab_ferramenta:
                             if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
                                 img_bytes = z.read(filename)
                                 pil_img = Image.open(io.BytesIO(img_bytes))
-                                pil_img = ImageOps.exif_transpose(pil_img) # Corrige orientação do celular
+                                pil_img = ImageOps.exif_transpose(pil_img)
                                 lista_fotos_processar.append((pil_img, img_bytes, filename))
                 else:
                     img_bytes = f.read()
                     pil_img = Image.open(io.BytesIO(img_bytes))
-                    pil_img = ImageOps.exif_transpose(pil_img) # Corrige orientação do celular
+                    pil_img = ImageOps.exif_transpose(pil_img)
                     lista_fotos_processar.append((pil_img, img_bytes, f.name))
 
-            status.write(f"🔍 Leitura otimizada em {len(lista_fotos_processar)} fotos...")
-
-            mapa_codigo_imagem = {}
-            fotos_falhas = [] # Lista para salvar fotos que não puderam ser lidas
+            progresso = st.progress(0)
+            status = st.empty()
+            status.write(f"🔍 Executando leitura automática em {len(lista_fotos_processar)} fotos...")
 
             for idx, (pil_img, img_bytes, nome_f) in enumerate(lista_fotos_processar):
                 np_arr = np.frombuffer(img_bytes, np.uint8)
@@ -313,103 +314,101 @@ with tab_ferramenta:
                 
                 if codigos_lidos:
                     for cod in codigos_lidos:
-                        # Extrai APENAS OS ÚLTIMOS 9 DÍGITOS
-                        cod_bruto = str(cod).strip().split('.')[0]
-                        cod_numerico = ''.join(filter(str.isdigit, cod_bruto))
-                        cod_9_digitos = cod_numerico[-9:] if len(cod_numerico) >= 9 else cod_numerico.zfill(9)
-                        
-                        mapa_codigo_imagem[cod_9_digitos] = pil_img
+                        cod_9 = normalizar_codigo_9_digitos(cod)
+                        if cod_9:
+                            st.session_state.mapa_codigo_imagem[cod_9] = pil_img
                 else:
-                    # Salva a imagem que falhou na leitura
-                    fotos_falhas.append((nome_f, pil_img))
+                    st.session_state.fotos_pendentes.append((nome_f, pil_img))
 
-                progresso.progress((idx + 1) / len(lista_fotos_processar) * 0.5)
+                progresso.progress((idx + 1) / len(lista_fotos_processar))
 
-            status.write(f"✅ **{len(mapa_codigo_imagem)}** código(s) de 9 dígitos mapeado(s) nas fotos!")
+            status.success(f"✅ Leitura automática concluída! **{len(st.session_state.mapa_codigo_imagem)}** lidas com sucesso. **{len(st.session_state.fotos_pendentes)}** fotos precisam de verificação.")
 
-            # 2. Carregar Excel e Inserir Fotos
-            wb = openpyxl.load_workbook(arquivo_excel)
-            ws = wb[nome_aba]
+        # --- SEÇÃO DE MANUSEIO MANUAL PARA FOTOS NÃO LIDAS ---
+        if "fotos_pendentes" in st.session_state and len(st.session_state.fotos_pendentes) > 0:
+            st.markdown("---")
+            st.warning(f"⚠️ **{len(st.session_state.fotos_pendentes)} foto(s) não foram identificadas automaticamente.** Digite os últimos dígitos abaixo para incluir na planilha:")
 
-            col_idx_codigo = None
-            for col in range(1, ws.max_column + 1):
-                val_cabecalho = str(ws.cell(row=1, column=col).value or "").strip()
-                if val_cabecalho == str(coluna_codigo).strip():
-                    col_idx_codigo = col
-                    break
+            codigos_digitados = {}
+            cols = st.columns(min(len(st.session_state.fotos_pendentes), 3))
 
-            if not col_idx_codigo:
-                st.error(f"❌ Não foi possível localizar a coluna '{coluna_codigo}' na planilha.")
-                st.stop()
+            for idx, (nome_f, img_obj) in enumerate(st.session_state.fotos_pendentes):
+                with cols[idx % 3]:
+                    st.image(img_obj, caption=f"📄 {nome_f}", use_container_width=True)
+                    ent_code = st.text_input(f"Código para {nome_f}:", key=f"manual_{idx}", placeholder="Ex: 999888777")
+                    if ent_code.strip():
+                        codigos_digitados[idx] = normalizar_codigo_9_digitos(ent_code)
 
-            col_idx_foto = ws.max_column + 1
-            ws.cell(row=1, column=col_idx_foto).value = nome_coluna_foto
-
-            vincularam = 0
-            tot_rows = ws.max_row
-            codigos_excel_debug = []
-
-            for row in range(2, tot_rows + 1):
-                raw_val = ws.cell(row=row, column=col_idx_codigo).value
-                if raw_val is None:
-                    continue
+            if st.button("➕ Adicionar Códigos Manuais e Atualizar Lista", use_container_width=True):
+                removidos = []
+                for idx, cod_norm in codigos_digitados.items():
+                    if cod_norm:
+                        nome_f, img_obj = st.session_state.fotos_pendentes[idx]
+                        st.session_state.mapa_codigo_imagem[cod_norm] = img_obj
+                        removidos.append(idx)
                 
-                val_bruto = str(raw_val).strip().split('.')[0]
-                val_numerico = ''.join(filter(str.isdigit, val_bruto))
-                
-                if not val_numerico:
-                    continue
+                # Atualiza a lista de pendentes removendo as que foram corrigidas
+                st.session_state.fotos_pendentes = [item for i, item in enumerate(st.session_state.fotos_pendentes) if i not in removidos]
+                st.success("Códigos inseridos com sucesso!")
+                st.rerun()
 
-                codigo_excel_9 = val_numerico[-9:] if len(val_numerico) >= 9 else val_numerico.zfill(9)
-                codigos_excel_debug.append(codigo_excel_9)
+        # --- GERAÇÃO DA PLANILHA ---
+        if "mapa_codigo_imagem" in st.session_state and len(st.session_state.mapa_codigo_imagem) > 0:
+            st.markdown("---")
+            if st.button("📊 APLECAR E GERAR PLANILHA FINAL COM AS FOTOS", use_container_width=True):
+                wb = openpyxl.load_workbook(arquivo_excel)
+                ws = wb[nome_aba]
 
-                if codigo_excel_9 in mapa_codigo_imagem:
-                    pil_img = mapa_codigo_imagem[codigo_excel_9].copy()
-                    pil_img.thumbnail((130, 80))
-                    
-                    img_byte_arr = io.BytesIO()
-                    pil_img.save(img_byte_arr, format='PNG')
-                    
-                    img_excel = OpenpyxlImage(img_byte_arr)
-                    cell_address = ws.cell(row=row, column=col_idx_foto).coordinate
-                    ws.add_image(img_excel, cell_address)
-                    
-                    ws.row_dimensions[row].height = 65
-                    vincularam += 1
+                col_idx_codigo = None
+                for col in range(1, ws.max_column + 1):
+                    val_cabecalho = str(ws.cell(row=1, column=col).value or "").strip()
+                    if val_cabecalho == str(coluna_codigo).strip():
+                        col_idx_codigo = col
+                        break
 
-                progresso.progress(0.5 + (row / tot_rows * 0.5))
+                if not col_idx_codigo:
+                    st.error(f"❌ Não foi possível localizar a coluna '{coluna_codigo}' na planilha.")
+                    st.stop()
 
-            col_letter = openpyxl.utils.get_column_letter(col_idx_foto)
-            ws.column_dimensions[col_letter].width = 18
+                col_idx_foto = ws.max_column + 1
+                ws.cell(row=1, column=col_idx_foto).value = nome_coluna_foto
 
-            output_excel = io.BytesIO()
-            wb.save(output_excel)
-            output_excel.seek(0)
+                vincularam = 0
+                tot_rows = ws.max_row
 
-            # --- RESULTADO DO PROCESSAMENTO ---
-            if vincularam > 0:
-                status.success(f"🎉 Processamento concluído! **{vincularam}** fotos foram vinculadas com sucesso!")
+                for row in range(2, tot_rows + 1):
+                    raw_val = ws.cell(row=row, column=col_idx_codigo).value
+                    codigo_excel_9 = normalizar_codigo_9_digitos(raw_val)
+
+                    if codigo_excel_9 and codigo_excel_9 in st.session_state.mapa_codigo_imagem:
+                        pil_img = st.session_state.mapa_codigo_imagem[codigo_excel_9].copy()
+                        pil_img.thumbnail((130, 80))
+                        
+                        img_byte_arr = io.BytesIO()
+                        pil_img.save(img_byte_arr, format='PNG')
+                        
+                        img_excel = OpenpyxlImage(img_byte_arr)
+                        cell_address = ws.cell(row=row, column=col_idx_foto).coordinate
+                        ws.add_image(img_excel, cell_address)
+                        
+                        ws.row_dimensions[row].height = 65
+                        vincularam += 1
+
+                col_letter = openpyxl.utils.get_column_letter(col_idx_foto)
+                ws.column_dimensions[col_letter].width = 18
+
+                output_excel = io.BytesIO()
+                wb.save(output_excel)
+                output_excel.seek(0)
+
+                st.success(f"🎉 Processamento finalizado! **{vincularam}** fotos inseridas no Excel!")
                 st.download_button(
-                    label="📥 BAIXAR PLANILHA ATUALIZADA COM AS FOTOS",
+                    label="📥 BAIXAR PLANILHA FINAL COM FOTOS",
                     data=output_excel,
                     file_name="Planilha_Com_Fotos.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True
                 )
-            else:
-                status.warning("⚠️ Nenhuma foto foi vinculada! Verifique as chaves lidas.")
-
-            # --- PAINEL EXCLUSIVO PARA FOTOS QUE FALHARAM ---
-            if fotos_falhas:
-                st.markdown("---")
-                st.subheader(f"⚠️ Atenção: {len(fotos_falhas)} foto(s) precisam de verificação manual")
-                st.write("O código de barras **não pôde ser lido automaticamente** nas seguintes fotos. Verifique a iluminação ou se o código está desfocado:")
-
-                # Exibe miniatura das fotos que falharam
-                cols_falha = st.columns(min(len(fotos_falhas), 4))
-                for i, (nome_arq, img_obj) in enumerate(fotos_falhas):
-                    with cols_falha[i % 4]:
-                        st.image(img_obj, caption=f"📄 {nome_arq}", use_container_width=True)
 
 # ==========================================
 # ABA 2: PAINEL DE ADMIN
@@ -431,4 +430,4 @@ if e_admin and tab_admin:
 
 # --- RODAPÉ ---
 st.markdown("<br><br>---", unsafe_allow_html=True)
-st.markdown("<div style='text-align:center; color:#888;'>Desenvolvido por <strong>Diego Costa</strong></div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; color:#888;'>Desenvolvimento e Engenharia por <strong>Diego Costa</strong></div>", unsafe_allow_html=True)
