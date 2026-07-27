@@ -625,7 +625,7 @@ if e_admin and tab_admin:
     with tab_admin:
         st.markdown("<div style='font-size: 20px; font-weight: bold; color: #FFFFFF; margin-bottom: 10px;'>👑 Gestão de Usuários e Aprovações</div>", unsafe_allow_html=True)
         
-        # Alerta com Link do WhatsApp após aprovação
+        # Alerta de aprovação + Link do WhatsApp
         if st.session_state.mensagem_aprovacao:
             st.success(st.session_state.mensagem_aprovacao["texto"])
             st.markdown(f"""
@@ -648,13 +648,13 @@ if e_admin and tab_admin:
         df_usuarios = listar_todos_usuarios()
         pendentes = df_usuarios[df_usuarios['status'] == 'pendente']
         
+        # Bloco de Solicitações Pendentes
         if len(pendentes) > 0:
             st.markdown("### ⏳ Solicitações Pendentes")
             for idx, user in pendentes.iterrows():
                 c_info, c_btn1, c_btn2 = st.columns([3, 1.2, 1.2])
                 c_info.write(f"**{user['nome_completo']}** (`@{user['usuario']}`) - Whats: `{user['contato']}`")
                 
-                # Montando o link e mensagem para o WhatsApp
                 num_limpo = re.sub(r'\D', '', str(user['contato']))
                 msg = urllib.parse.quote(f"Olá {user['nome_completo']}! Seu cadastro no Organizador de Planilhas foi APROVADO com sucesso. Você já pode fazer login e acessar o sistema!")
                 link_wa = f"https://wa.me/{num_limpo}?text={msg}"
@@ -672,8 +672,21 @@ if e_admin and tab_admin:
                     st.rerun()
             st.markdown("---")
             
-        st.markdown("### 👥 Todos os Usuários Cadastrados")
-        st.dataframe(df_usuarios, use_container_width=True)
+        # Bloco com a Lista Completa + Opção de EXCLUIR USUÁRIO
+        st.markdown("### 👥 Gestão e Exclusão de Usuários")
+        
+        for idx, user in df_usuarios.iterrows():
+            col_usr_info, col_usr_del = st.columns([4, 1])
+            
+            status_tag = "🟢 Aprovado" if user['status'] == 'aprovado' else "⏳ Pendente"
+            col_usr_info.write(f"**{user['nome_completo']}** (`@{user['usuario']}`) | {status_tag} | Role: `{user['role']}`")
+            
+            # Não permitir que o admin principal apague a própria conta por engano
+            if user['usuario'] != "diego.costa":
+                if col_usr_del.button("🗑️ Excluir", key=f"del_{user['usuario']}"):
+                    atualizar_status_db(user['usuario'], 'excluir')
+                    st.success(f"Usuário @{user['usuario']} excluído com sucesso!")
+                    st.rerun()
 
 # --- 7. RODAPÉ ---
 st.markdown("<br><br><hr style='border-color: rgba(255, 255, 255, 0.1);'>", unsafe_allow_html=True)
