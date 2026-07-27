@@ -198,6 +198,8 @@ if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 if "usuario_logado" not in st.session_state:
     st.session_state.usuario_logado = None
+if "mensagem_aprovacao" not in st.session_state:
+    st.session_state.mensagem_aprovacao = None
 
 if not st.session_state.autenticado:
     st.markdown("<br><br>", unsafe_allow_html=True)
@@ -227,7 +229,7 @@ if not st.session_state.autenticado:
                             st.session_state.usuario_logado = dados_usr
                             st.rerun()
                         elif dados_usr["status"] == "pendente":
-                            st.warning("⏳ Seu cadastro está em análise.")
+                            st.warning("⏳ Seu cadastro está aguardando aprovação do administrador.")
                         else:
                             st.error("🚫 Acesso bloqueado.")
                     else:
@@ -238,7 +240,7 @@ if not st.session_state.autenticado:
                 novo_usr = st.text_input("Usuário").strip().lower()
                 nova_senha = st.text_input("Senha", type="password")
                 nome_comp = st.text_input("Nome Completo")
-                contato_wa = st.text_input("WhatsApp com DDD")
+                contato_wa = st.text_input("WhatsApp com DDD (Ex: 11999998888)")
                 btn_cadastrar = st.form_submit_button("Enviar Solicitação", use_container_width=True)
 
                 if btn_cadastrar:
@@ -409,7 +411,7 @@ else:
     tab_admin = None
 
 # ==========================================
-# ABA 1: FERRAMENTA DE ORGANIZAÇÃO (LAYOUT RECORTE)
+# ABA 1: FERRAMENTA DE ORGANIZAÇÃO
 # ==========================================
 with tab_ferramenta:
     col_left, col_right = st.columns([2.3, 1])
@@ -421,7 +423,6 @@ with tab_ferramenta:
         st.markdown("<div style='font-size: 15px; font-weight: 600; color: #FFFFFF; margin-top: 15px; margin-bottom: 8px;'>2. Selecione ou arraste o lote de fotos (ou .ZIP)</div>", unsafe_allow_html=True)
         arquivos_fotos = st.file_uploader("Upload Fotos", type=["jpg", "jpeg", "png", "zip"], accept_multiple_files=True, label_visibility="collapsed")
 
-    # Atualização dinâmica de Métricas para o Painel do Lote
     planilha_carregada = "Sim" if arquivo_excel else "Não"
     qtd_fotos = len(arquivos_fotos) if arquivos_fotos else 0
     vinculos_encontrados = len(st.session_state.mapa_codigo_imagem) if "mapa_codigo_imagem" in st.session_state else 0
@@ -450,7 +451,6 @@ with tab_ferramenta:
             </div>
         """, unsafe_allow_html=True)
 
-    # PROCESSAMENTO E CONFIGURAÇÕES
     if arquivo_excel and arquivos_fotos:
         st.markdown("---")
         st.markdown("<div style='font-size: 18px; font-weight: 700; color: #FFFFFF; margin-bottom: 12px;'>3. Mapeamento e Parâmetros</div>", unsafe_allow_html=True)
@@ -624,23 +624,55 @@ with tab_ferramenta:
 if e_admin and tab_admin:
     with tab_admin:
         st.markdown("<div style='font-size: 20px; font-weight: bold; color: #FFFFFF; margin-bottom: 10px;'>👑 Gestão de Usuários e Aprovações</div>", unsafe_allow_html=True)
-        df_usuarios = listar_todos_usuarios()
         
+        # Alerta com Link do WhatsApp após aprovação
+        if st.session_state.mensagem_aprovacao:
+            st.success(st.session_state.mensagem_aprovacao["texto"])
+            st.markdown(f"""
+                <a href="{st.session_state.mensagem_aprovacao['link_wa']}" target="_blank" style="
+                    display: inline-block;
+                    background-color: #25D366;
+                    color: white;
+                    padding: 8px 16px;
+                    text-decoration: none;
+                    border-radius: 6px;
+                    font-weight: bold;
+                    margin-bottom: 15px;">
+                    💬 Enviar Notificação via WhatsApp
+                </a>
+            """, unsafe_allow_html=True)
+            if st.button("Fechar Notificação"):
+                st.session_state.mensagem_aprovacao = None
+                st.rerun()
+
+        df_usuarios = listar_todos_usuarios()
         pendentes = df_usuarios[df_usuarios['status'] == 'pendente']
+        
         if len(pendentes) > 0:
             st.markdown("### ⏳ Solicitações Pendentes")
             for idx, user in pendentes.iterrows():
-                c_info, c_btn1, c_btn2 = st.columns([3, 1, 1])
-                c_info.write(f"**{user['nome_completo']}** (`@{user['usuario']}`) - Tel: {user['contato']}")
-                if c_btn1.button("✅ Aprovar", key=f"ap_{user['usuario']}"):
+                c_info, c_btn1, c_btn2 = st.columns([3, 1.2, 1.2])
+                c_info.write(f"**{user['nome_completo']}** (`@{user['usuario']}`) - Whats: `{user['contato']}`")
+                
+                # Montando o link e mensagem para o WhatsApp
+                num_limpo = re.sub(r'\D', '', str(user['contato']))
+                msg = urllib.parse.quote(f"Olá {user['nome_completo']}! Seu cadastro no Organizador de Planilhas foi APROVADO com sucesso. Você já pode fazer login e acessar o sistema!")
+                link_wa = f"https://wa.me/{num_limpo}?text={msg}"
+
+                if c_btn1.button("✅ Aprovar e Notificar", key=f"ap_{user['usuario']}"):
                     atualizar_status_db(user['usuario'], 'aprovado')
+                    st.session_state.mensagem_aprovacao = {
+                        "texto": f"Usuário **{user['nome_completo']}** aprovado com sucesso!",
+                        "link_wa": link_wa
+                    }
                     st.rerun()
+                    
                 if c_btn2.button("🚫 Recusar", key=f"rec_{user['usuario']}"):
                     atualizar_status_db(user['usuario'], 'excluir')
                     st.rerun()
             st.markdown("---")
             
-        st.markdown("### 👥 Todos os Usuários")
+        st.markdown("### 👥 Todos os Usuários Cadastrados")
         st.dataframe(df_usuarios, use_container_width=True)
 
 # --- 7. RODAPÉ ---
