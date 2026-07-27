@@ -1,7 +1,10 @@
 streamlit
 opencv-python-headless
-numpy
-pandas
+pillow
 openpyxl
-Pillow
+pandas
 zxing-cpp
+pyzbar
+easyocr
+torch --index-url https://download.pytorch.org/whl/cpu
+torchvision --index-url https://download.pytorch.org/whl/cpu
