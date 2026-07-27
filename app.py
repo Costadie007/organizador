@@ -10,6 +10,7 @@ import os
 import zipfile
 import io
 import json
+import re
 
 # --- CONFIGURAÇÃO DE ADMINISTRADOR ---
 USUARIO_ADMIN = "diego.costa"
@@ -180,7 +181,7 @@ with col_logo:
 with col_titulo:
     st.markdown("""
         <h1 style="margin:0; font-size: 32px;">Organizador de Planilhas</h1>
-        <p style="margin:0; color:#bbbbbb !important;">Vincule fotos a planilhas Excel automaticamente através da leitura de código de barras.</p>
+        <p style="margin:0; color:#bbbbbb !important;">Vincule fotos a planilhas Excel automaticamente através da leitura rápida de dígitos e código de barras.</p>
     """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -192,106 +193,33 @@ else:
     tab_ferramenta, = st.tabs(["⚙️ Ferramenta de Organização"])
     tab_admin = None
 
-# --- MOTOR ULTRA AVANÇADO DE LEITURA MULTI-ESTÁGIO ---
-def extrair_codigos_imagem_extremo(cv_img):
-    codigos_encontrados = set()
+# HELPER: EXTRAI APENAS OS DÍGITOS NUMÉRICOS
+def extrair_apenas_digitos(texto):
+    if texto is None:
+        return ""
+    return str(re.sub(r'\D', '', str(texto)))
 
-    def ler_zxing(img):
-        results = zxingcpp.read_barcodes(img)
+# LEITOR RÁPIDO DE CÓDIGO DA IMAGEM
+def extrair_digitos_imagem(cv_img, nome_arquivo):
+    digitos_encontrados = set()
+    
+    # 1. Extrai números do próprio NOME do arquivo
+    nums_nome = extrair_apenas_digitos(nome_arquivo)
+    if nums_nome:
+        digitos_encontrados.add(nums_nome)
+
+    # 2. Tenta leitura direta do código de barras
+    try:
+        results = zxingcpp.read_barcodes(cv_img)
         for r in results:
             if r.valid and r.text:
-                codigos_encontrados.add(r.text.strip())
-
-    # Passo 1: Leitura na imagem original e em escala de cinza
-    ler_zxing(cv_img)
-    if codigos_encontrados:
-        return list(codigos_encontrados)
-
-    gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY) if len(cv_img.shape) == 3 else cv_img
-    ler_zxing(gray)
-    if codigos_encontrados:
-        return list(codigos_encontrados)
-
-    # Passo 2: Sharpening (Nitidez para fotos desfocadas)
-    kernel_sharpen = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
-    sharp = cv2.filter2D(gray, -1, kernel_sharpen)
-    ler_zxing(sharp)
-    if codigos_encontrados:
-        return list(codigos_encontrados)
-
-    # Passo 3: CLAHE (Ajuste local de contraste para fotos com sombra)
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
-    gray_contrast = clahe.apply(gray)
-    ler_zxing(gray_contrast)
-    if codigos_encontrados:
-        return list(codigos_encontrados)
-
-    # Passo 4: Limiarização Adaptativa e Binarização de Otsu
-    _, thresh_otsu = cv2.threshold(gray_contrast, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    ler_zxing(thresh_otsu)
-    if codigos_encontrados:
-        return list(codigos_encontrados)
-
-    thresh_adapt = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-    ler_zxing(thresh_adapt)
-    if codigos_encontrados:
-        return list(codigos_encontrados)
-
-    # Passo 5: Detecção de Região de Interesse (Auto-Crop na área do Código)
-    try:
-        grad_x = cv2.Sobel(gray, ddepth=cv2.CV_32F, dx=1, dy=0, ksize=-1)
-        grad_y = cv2.Sobel(gray, ddepth=cv2.CV_32F, dx=0, dy=1, ksize=-1)
-        gradient = cv2.subtract(grad_x, grad_y)
-        gradient = cv2.convertScaleAbs(gradient)
-        blurred = cv2.blur(gradient, (9, 9))
-        _, thresh_crop = cv2.threshold(blurred, 225, 255, cv2.THRESH_BINARY)
-        
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 7))
-        closed = cv2.morphologyEx(thresh_crop, cv2.MORPH_CLOSE, kernel)
-        cnts, _ = cv2.findContours(closed.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        if cnts:
-            c = sorted(cnts, key=cv2.contourArea, reverse=True)[0]
-            rect = cv2.minAreaRect(c)
-            box = cv2.boxPoints(rect)
-            box = np.intp(box)
-            x, y, w, h = cv2.boundingRect(box)
-            # Crop com folga
-            pad = 20
-            h_img, w_img = gray.shape
-            crop = gray[max(0, y-pad):min(h_img, y+h+pad), max(0, x-pad):min(w_img, x+w+pad)]
-            if crop.size > 0:
-                ler_zxing(crop)
-                if codigos_encontrados:
-                    return list(codigos_encontrados)
+                num_bar = extrair_apenas_digitos(r.text)
+                if num_bar:
+                    digitos_encontrados.add(num_bar)
     except Exception:
         pass
 
-    # Passo 6: Testar Várias Escalas (Resize Zoom In / Zoom Out)
-    for fx_fy in [1.5, 2.0, 0.5]:
-        resized = cv2.resize(gray_contrast, (0, 0), fx=fx_fy, fy=fx_fy, interpolation=cv2.INTER_CUBIC)
-        ler_zxing(resized)
-        if codigos_encontrados:
-            return list(codigos_encontrados)
-
-    # Passo 7: Rotações de 90°, 180° e 270° em todas as tentativas anteriores
-    for rot in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_180, cv2.ROTATE_90_COUNTERCLOCKWISE]:
-        rot_img = cv2.rotate(gray_contrast, rot)
-        ler_zxing(rot_img)
-        if codigos_encontrados:
-            return list(codigos_encontrados)
-
-    return list(codigos_encontrados)
-
-def normalizar_codigo_9_digitos(val_raw):
-    if val_raw is None:
-        return ""
-    val_bruto = str(val_raw).strip().split('.')[0]
-    val_numerico = ''.join(filter(str.isdigit, val_bruto))
-    if not val_numerico:
-        return ""
-    return val_numerico[-9:] if len(val_numerico) >= 9 else val_numerico.zfill(9)
-
+    return list(digitos_encontrados)
 
 # ==========================================
 # ABA 1: FERRAMENTA PRINCIPAL
@@ -324,11 +252,12 @@ with tab_ferramenta:
         with col_destino:
             nome_coluna_foto = st.text_input("Nome da nova coluna para INSERIR A FOTO:", value="FOTO")
 
-        if st.button("🚀 INICIAR PROCESSAMENTO AUTOMÁTICO", use_container_width=True):
+        if st.button("🚀 INICIAR VERIFICAÇÃO HIERÁRQUICA (4D ➔ 8D)", use_container_width=True):
             st.session_state.mapa_codigo_imagem = {}
-            st.session_state.fotos_pendentes = []
+            st.session_state.fotos_conflito = []
 
-            lista_fotos_processar = []
+            # 1. Carregar fotos e extrair identificadores
+            lista_fotos = []
             for f in arquivos_fotos:
                 if f.name.endswith(".zip"):
                     with zipfile.ZipFile(f) as z:
@@ -337,60 +266,122 @@ with tab_ferramenta:
                                 img_bytes = z.read(filename)
                                 pil_img = Image.open(io.BytesIO(img_bytes))
                                 pil_img = ImageOps.exif_transpose(pil_img)
-                                lista_fotos_processar.append((pil_img, img_bytes, filename))
+                                lista_fotos.append((filename, pil_img, img_bytes))
                 else:
                     img_bytes = f.read()
                     pil_img = Image.open(io.BytesIO(img_bytes))
                     pil_img = ImageOps.exif_transpose(pil_img)
-                    lista_fotos_processar.append((pil_img, img_bytes, f.name))
+                    lista_fotos.append((f.name, pil_img, img_bytes))
 
-            progresso = st.progress(0)
-            status = st.empty()
-            status.write(f"⚡ Processando {len(lista_fotos_processar)} fotos com motor de inteligência visual...")
-
-            for idx, (pil_img, img_bytes, nome_f) in enumerate(lista_fotos_processar):
+            # Mapeamento de todas as fotos para seus dígitos
+            banco_fotos_digitos = []
+            for nome_f, pil_img, img_bytes in lista_fotos:
                 np_arr = np.frombuffer(img_bytes, np.uint8)
                 cv_img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-                
-                codigos_lidos = extrair_codigos_imagem_extremo(cv_img) if cv_img is not None else []
-                
-                if codigos_lidos:
-                    for cod in codigos_lidos:
-                        cod_9 = normalizar_codigo_9_digitos(cod)
-                        if cod_9:
-                            st.session_state.mapa_codigo_imagem[cod_9] = pil_img
+                digitos = extrair_digitos_imagem(cv_img, nome_f)
+                banco_fotos_digitos.append({
+                    "nome": nome_f,
+                    "pil_img": pil_img,
+                    "digitos_list": digitos
+                })
+
+            # 2. Varre a planilha e aplica as regras de 4 dígitos -> 8 dígitos -> Conflito
+            st.session_state.conflitos_pendentes = []
+            
+            total_linhas = len(df_temp)
+            progresso = st.progress(0)
+            status = st.empty()
+
+            vincularam_auto = 0
+
+            for idx, row_data in df_temp.iterrows():
+                val_raw = row_data[coluna_codigo]
+                cod_excel_num = extrair_apenas_digitos(val_raw)
+
+                if not cod_excel_num:
+                    continue
+
+                d4_excel = cod_excel_num[-4:] if len(cod_excel_num) >= 4 else cod_excel_num.zfill(4)
+                d8_excel = cod_excel_num[-8:] if len(cod_excel_num) >= 8 else cod_excel_num.zfill(8)
+
+                # PASSAGEM 1: Buscar fotos com os mesmos últimos 4 dígitos
+                matches_4d = []
+                for foto in banco_fotos_digitos:
+                    for d in foto["digitos_list"]:
+                        if d.endswith(d4_excel):
+                            matches_4d.append(foto)
+                            break
+
+                # CASO A: Apenas 1 foto bateu nos últimos 4 dígitos -> VÍNCULO DIRETO!
+                if len(matches_4d) == 1:
+                    st.session_state.mapa_codigo_imagem[cod_excel_num] = matches_4d[0]["pil_img"]
+                    vincularam_auto += 1
+
+                # CASO B: Mais de 1 foto com os mesmos 4 dígitos -> Desempate pelos últimos 8 dígitos
+                elif len(matches_4d) > 1:
+                    matches_8d = []
+                    for foto in matches_4d:
+                        for d in foto["digitos_list"]:
+                            if d.endswith(d8_excel):
+                                matches_8d.append(foto)
+                                break
+                    
+                    # Desempate com sucesso nos 8 dígitos!
+                    if len(matches_8d) == 1:
+                        st.session_state.mapa_codigo_imagem[cod_excel_num] = matches_8d[0]["pil_img"]
+                        vincularam_auto += 1
+                    else:
+                        # Conflito real não resolvido -> Manda para validação manual de desempate
+                        st.session_state.conflitos_pendentes.append({
+                            "codigo_excel": cod_excel_num,
+                            "opcoes_fotos": matches_8d if len(matches_8d) > 0 else matches_4d
+                        })
                 else:
-                    st.session_state.fotos_pendentes.append((nome_f, pil_img))
+                    # Nenhuma foto bateu 4 dígitos
+                    pass
 
-                progresso.progress((idx + 1) / len(lista_fotos_processar))
+                progresso.progress((idx + 1) / total_linhas)
 
-            status.success(f"✅ Leitura concluída! **{len(st.session_state.mapa_codigo_imagem)}** código(s) mapeado(s) automaticamente.")
+            status.success(f"✅ Processamento concluído! **{vincularam_auto}** fotos vinculadas automaticamente. Conflitos para validar: **{len(st.session_state.conflitos_pendentes)}**.")
 
-        # --- SEÇÃO DE EXCEÇÕES (Apenas para emergências) ---
-        if "fotos_pendentes" in st.session_state and len(st.session_state.fotos_pendentes) > 0:
+        # --- SEÇÃO DE VALIDAÇÃO MANUAL APENAS EM CONFLITOS REAIS ---
+        if "conflitos_pendentes" in st.session_state and len(st.session_state.conflitos_pendentes) > 0:
             st.markdown("---")
-            st.warning(f"⚠️ Apenas **{len(st.session_state.fotos_pendentes)}** foto(s) de um total alto não puderam ser lidas automaticamente.")
+            st.warning(f"⚠️ **{len(st.session_state.conflitos_pendentes)} item(ns)** possuem fotos com os mesmos últimos dígitos. Selecione qual foto pertence a qual código:")
 
-            codigos_digitados = {}
-            cols = st.columns(min(len(st.session_state.fotos_pendentes), 3))
+            respostas_conflitos = {}
 
-            for idx, (nome_f, img_obj) in enumerate(st.session_state.fotos_pendentes):
-                with cols[idx % 3]:
-                    st.image(img_obj, caption=f"📄 {nome_f}", use_container_width=True)
-                    ent_code = st.text_input(f"Código ({nome_f}):", key=f"manual_{idx}", placeholder="Últimos 9 dígitos")
-                    if ent_code.strip():
-                        codigos_digitados[idx] = normalizar_codigo_9_digitos(ent_code)
-
-            if st.button("➕ Vincular exceções manuais", use_container_width=True):
-                removidos = []
-                for idx, cod_norm in codigos_digitados.items():
-                    if cod_norm:
-                        nome_f, img_obj = st.session_state.fotos_pendentes[idx]
-                        st.session_state.mapa_codigo_imagem[cod_norm] = img_obj
-                        removidos.append(idx)
+            for idx, conflito in enumerate(st.session_state.conflitos_pendentes):
+                st.markdown(f"#### Código da Planilha: `{conflito['codigo_excel']}`")
                 
-                st.session_state.fotos_pendentes = [item for i, item in enumerate(st.session_state.fotos_pendentes) if i not in removidos]
-                st.success("Exceções atualizadas!")
+                opcoes_fotos = conflito["opcoes_fotos"]
+                cols = st.columns(min(len(opcoes_fotos), 4))
+                
+                nomes_opcoes = ["-- Selecionar --"] + [f["nome"] for f in opcoes_fotos]
+                
+                for f_idx, foto_obj in enumerate(opcoes_fotos):
+                    with cols[f_idx % 4]:
+                        st.image(foto_obj["pil_img"], caption=foto_obj["nome"], use_container_width=True)
+
+                escolha = st.selectbox(
+                    f"Qual foto corresponde ao código {conflito['codigo_excel']}?",
+                    options=nomes_opcoes,
+                    key=f"conf_{idx}"
+                )
+                
+                if escolha != "-- Selecionar --":
+                    # Encontra a imagem da opção
+                    for f in opcoes_fotos:
+                        if f["nome"] == escolha:
+                            respostas_conflitos[conflito['codigo_excel']] = f["pil_img"]
+
+            if st.button("➕ Confirmar Escolhas e Atualizar Planilha", use_container_width=True):
+                for cod, img_pil in respostas_conflitos.items():
+                    st.session_state.mapa_codigo_imagem[cod] = img_pil
+                
+                # Remove resolvidos
+                st.session_state.conflitos_pendentes = [c for c in st.session_state.conflitos_pendentes if c['codigo_excel'] not in respostas_conflitos]
+                st.success("Conflitos resolvidos!")
                 st.rerun()
 
         # --- GERAÇÃO E DOWNLOAD DA PLANILHA ---
@@ -419,10 +410,10 @@ with tab_ferramenta:
 
                 for row in range(2, tot_rows + 1):
                     raw_val = ws.cell(row=row, column=col_idx_codigo).value
-                    codigo_excel_9 = normalizar_codigo_9_digitos(raw_val)
+                    cod_num = extrair_apenas_digitos(raw_val)
 
-                    if codigo_excel_9 and codigo_excel_9 in st.session_state.mapa_codigo_imagem:
-                        pil_img = st.session_state.mapa_codigo_imagem[codigo_excel_9].copy()
+                    if cod_num and cod_num in st.session_state.mapa_codigo_imagem:
+                        pil_img = st.session_state.mapa_codigo_imagem[cod_num].copy()
                         pil_img.thumbnail((130, 80))
                         
                         img_byte_arr = io.BytesIO()
@@ -471,4 +462,4 @@ if e_admin and tab_admin:
 
 # --- RODAPÉ ---
 st.markdown("<br><br>---", unsafe_allow_html=True)
-st.markdown("<div style='text-align:center; color:#888;'>Desenvolvimento e Engenharia por <strong>Diego Costa</strong></div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; color:#888;'>Desenvolvido por <strong>Diego Costa</strong></div>", unsafe_allow_html=True)
