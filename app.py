@@ -571,22 +571,38 @@ with tab_ferramenta:
                 col_idx_foto = ws.max_column + 1
                 ws.cell(row=1, column=col_idx_foto).value = nome_coluna_foto
 
+                # Configurações de dimensão padronizada para as fotos no Excel
+                LARGURA_FOTO_PX = 160
+                ALTURA_FOTO_PX = 80
+                ALTURA_LINHA_EXCEL = 65
+                LARGURA_COLUNA_EXCEL = 24
+
+                col_letter = openpyxl.utils.get_column_letter(col_idx_foto)
+                ws.column_dimensions[col_letter].width = LARGURA_COLUNA_EXCEL
+
                 mapa_fotos_linha, vincularam = {}, 0
                 for row in range(2, ws.max_row + 1):
                     cod_num = extrair_apenas_digitos(ws.cell(row=row, column=col_idx_codigo).value)
                     if cod_num and cod_num in st.session_state.mapa_codigo_imagem:
                         pil_img = st.session_state.mapa_codigo_imagem[cod_num].copy()
-                        pil_img.thumbnail((120, 120))
+                        
+                        # Padroniza dimensão da imagem mantendo a proporção de forma nítida
+                        pil_img.thumbnail((LARGURA_FOTO_PX, ALTURA_FOTO_PX), Image.LANCZOS)
+                        
                         img_byte_arr = io.BytesIO()
                         pil_img.save(img_byte_arr, format='PNG')
+                        img_byte_arr.seek(0)
 
-                        ws.add_image(OpenpyxlImage(img_byte_arr), ws.cell(row=row, column=col_idx_foto).coordinate)
-                        ws.row_dimensions[row].height = 95
+                        img_excel = OpenpyxlImage(img_byte_arr)
+                        img_excel.width = pil_img.width
+                        img_excel.height = pil_img.height
+
+                        ws.add_image(img_excel, f"{col_letter}{row}")
+                        ws.row_dimensions[row].height = ALTURA_LINHA_EXCEL
+                        
                         vincularam += 1
                         mapa_fotos_linha[row] = img_byte_arr
 
-                col_letter = openpyxl.utils.get_column_letter(col_idx_foto)
-                ws.column_dimensions[col_letter].width = 20
                 total_dados = ws.max_row - 1
 
                 if modo_divisao == "Planilha Única (Sem divisão)" or total_dados <= 0:
@@ -616,17 +632,25 @@ with tab_ferramenta:
 
                             col_f_p = ws_p.max_column + 1
                             ws_p.cell(row=1, column=col_f_p).value = nome_coluna_foto
+                            col_letter_p = openpyxl.utils.get_column_letter(col_f_p)
+                            ws_p.column_dimensions[col_letter_p].width = LARGURA_COLUNA_EXCEL
 
                             l_dest = 2
                             for l_orig in range(linha_orig_inicio, linha_orig_fim + 1):
                                 if l_orig in mapa_fotos_linha:
                                     img_b = mapa_fotos_linha[l_orig]
                                     img_b.seek(0)
-                                    ws_p.add_image(OpenpyxlImage(img_b), f"{openpyxl.utils.get_column_letter(col_f_p)}{l_dest}")
-                                    ws_p.row_dimensions[l_dest].height = 95
+                                    
+                                    # Ajuste padronizado para as partes divididas
+                                    pil_p = Image.open(img_b)
+                                    img_excel_p = OpenpyxlImage(img_b)
+                                    img_excel_p.width = pil_p.width
+                                    img_excel_p.height = pil_p.height
+
+                                    ws_p.add_image(img_excel_p, f"{col_letter_p}{l_dest}")
+                                    ws_p.row_dimensions[l_dest].height = ALTURA_LINHA_EXCEL
                                 l_dest += 1
 
-                            ws_p.column_dimensions[openpyxl.utils.get_column_letter(col_f_p)].width = 20
                             out_p = io.BytesIO()
                             wb_p.save(out_p)
                             zf.writestr(f"Planilha_Parte_{p+1}_(Linhas_{dado_inicio}-{dado_fim}).xlsx", out_p.getvalue())
