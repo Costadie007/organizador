@@ -33,7 +33,6 @@ def init_db():
             data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    # Criar o Administrador Padrão se não existir
     c.execute("SELECT * FROM usuarios WHERE usuario = ?", ("diego.costa",))
     if not c.fetchone():
         c.execute('''
@@ -130,6 +129,7 @@ st.set_page_config(
 
 st.markdown('<meta name="google" content="notranslate">', unsafe_allow_html=True)
 
+# CSS CUSTOMIZADO QUE OMITA LINKS DE ÂNCORA E FORMATAR INTERFACE
 st.markdown(f"""
     <style>
     [data-testid="stToolbar"], [data-testid="stHeader"], header, #MainMenu {{
@@ -137,6 +137,18 @@ st.markdown(f"""
         visibility: hidden !important;
         height: 0px !important;
     }}
+    
+    /* ESCONDER ÍCONES DE ÂNCORA EM TÍTULOS E TEXTOS */
+    .css-1544g2n, .e16nr0p33, a.header-anchor, [data-testid="stHeaderActionElements"], .stMarkdown a[href^="#"] {{
+        display: none !important;
+        visibility: hidden !important;
+    }}
+    a[href^="#"] {{
+        pointer-events: none !important;
+        cursor: default !important;
+        text-decoration: none !important;
+    }}
+    
     .stApp {{
         background-color: {COR_GRAFITE};
         color: {COR_TEXTO};
@@ -174,12 +186,12 @@ st.markdown(f"""
         border-radius: 12px;
         margin-left: 5px;
     }}
-    .card-login {{
-        background-color: {COR_FUNDO_CARD};
-        padding: 30px;
-        border-radius: 16px;
-        box-shadow: 0 8px 30px rgba(0,0,0,0.5);
-        border: 1px solid #444340;
+    .titulo-secao {{
+        font-size: 22px;
+        font-weight: bold;
+        color: #FFFFFF;
+        margin-bottom: 12px;
+        display: block;
     }}
     </style>
 """, unsafe_allow_html=True)
@@ -190,7 +202,7 @@ if "autenticado" not in st.session_state:
 if "usuario_logado" not in st.session_state:
     st.session_state.usuario_logado = None
 
-# --- TELA DE LOGIN / CADASTRO PROFISSIONAL ---
+# --- TELA DE LOGIN / CADASTRO ---
 if not st.session_state.autenticado:
     st.markdown("<br><br>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 1.8, 1])
@@ -198,8 +210,8 @@ if not st.session_state.autenticado:
     with c2:
         st.markdown(f"""
             <div style="text-align: center; margin-bottom: 20px;">
-                <h1 style="color: {COR_LARANJA}; font-weight: 900; margin-bottom: 0px;">📊 Organizador Pro</h1>
-                <p style="color: #bbbbbb; font-size: 14px;">Gestão Inteligente e Automação de Planilhas</p>
+                <div style="color: {COR_LARANJA}; font-size: 32px; font-weight: 900;">📊 Organizador de Planilhas</div>
+                <p style="color: #bbbbbb; font-size: 14px; margin-top: 5px;">Gestão Inteligente e Automação de Planilhas</p>
             </div>
         """, unsafe_allow_html=True)
 
@@ -221,7 +233,7 @@ if not st.session_state.autenticado:
                         elif dados_usr["status"] == "pendente":
                             st.warning("⏳ Seu cadastro está em análise pelo administrador. Você receberá um aviso assim que for aprovado!")
                         else:
-                            st.error("🚫 Acesso bloqueado. Entre em contato com o suporte, (61) 99669-****")
+                            st.error("🚫 Acesso bloqueado. Entre em contato com o suporte.")
                     else:
                         st.error("Usuário ou senha incorretos.")
 
@@ -264,19 +276,19 @@ with st.sidebar:
         st.session_state.usuario_logado = None
         st.rerun()
 
-# --- CABEÇALHO DA PLATAFORMA ---
-col_logo, col_titulo = st.columns([1.2, 4])
+# --- CABEÇALHO IDÊNTICO À SUA IMAGEM ---
+col_logo, col_titulo = st.columns([1.2, 5.5])
 with col_logo:
     st.markdown(f"""
-        <div style="display:flex; justify-content:center; align-items:center; height:80px; background-color:{COR_FUNDO_CARD}; border-radius:10px;">
-            <h1 style="color:{COR_LARANJA} !important; font-weight:900; margin:0;">PRO</h1>
+        <div style="display:flex; justify-content:center; align-items:center; height:75px; background-color:{COR_FUNDO_CARD}; border-radius:10px;">
+            <div style="color:#FFFFFF; font-size: 32px; font-weight:900; margin:0;">PRO</div>
         </div>
     """, unsafe_allow_html=True)
 
 with col_titulo:
     st.markdown("""
-        <h1 style="margin:0; font-size: 32px;">Organizador de Planilhas </h1>
-        <p style="margin:0; color:#bbbbbb !important;">:Anexe suas fotos e sua planilha abaixo e ela será preenchida automaticamente, com divisor de planilhas integrado.</p>
+        <div style="font-size: 30px; font-weight: bold; color: #FFFFFF; margin: 0; line-height: 1.2;">Organizador de Planilhas</div>
+        <div style="margin-top: 4px; color:#bbbbbb; font-size: 14px;">Anexe suas fotos e sua planilha abaixo e ela será preenchida automaticamente, com divisor de planilhas integrado.</div>
     """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -413,16 +425,16 @@ with tab_ferramenta:
     col_xlsx, col_imgs = st.columns([1, 1])
 
     with col_xlsx:
-        st.markdown("### 1. Envie a Planilha Excel (.xlsx)")
+        st.markdown("<span class='titulo-secao'>1. Envie a Planilha Excel (.xlsx)</span>", unsafe_allow_html=True)
         arquivo_excel = st.file_uploader("Selecione a planilha", type=["xlsx"])
 
     with col_imgs:
-        st.markdown("### 2. Envie as Fotos (ou arquivo .ZIP)")
+        st.markdown("<span class='titulo-secao'>2. Envie as Fotos (ou arquivo .ZIP)</span>", unsafe_allow_html=True)
         arquivos_fotos = st.file_uploader("Selecione as fotos", type=["jpg", "jpeg", "png", "zip"], accept_multiple_files=True)
 
     if arquivo_excel and arquivos_fotos:
         st.markdown("---")
-        st.markdown("### 3. Mapeamento e Parâmetros")
+        st.markdown("<span class='titulo-secao'>3. Mapeamento e Parâmetros</span>", unsafe_allow_html=True)
 
         wb_temp = openpyxl.load_workbook(arquivo_excel)
         nome_aba = st.selectbox("Selecione a aba da planilha:", wb_temp.sheetnames)
@@ -509,7 +521,7 @@ with tab_ferramenta:
 
         if "mapa_codigo_imagem" in st.session_state and len(st.session_state.mapa_codigo_imagem) > 0:
             st.markdown("---")
-            st.markdown("### 4. Configuração de Saída e Divisão")
+            st.markdown("<span class='titulo-secao'>4. Configuração de Saída e Divisão</span>", unsafe_allow_html=True)
             modo_divisao = st.radio("Como deseja salvar/dividir a planilha?", ["Planilha Única (Sem divisão)", "Dividir por QUANTIDADE DE PARTES", "Dividir por QUANTIDADE DE LINHAS"], horizontal=True)
 
             num_partes, linhas_por_parte = 1, 0
@@ -595,17 +607,15 @@ with tab_ferramenta:
 # ==========================================
 if e_admin and tab_admin:
     with tab_admin:
-        st.markdown("## 👑 Painel de Controle de Usuários")
+        st.markdown("<div style='font-size: 24px; font-weight: bold; color: #FFFFFF; margin-bottom: 5px;'>👑 Painel de Controle de Usuários</div>", unsafe_allow_html=True)
         st.caption("Gerencie solicitações de acesso, aprove cadastros e notifique usuários diretamente via WhatsApp.")
 
         df_usuarios = listar_todos_usuarios()
 
-        # Separar Usuários Pendentes
         pendentes = df_usuarios[df_usuarios['status'] == 'pendente']
         aprovados = df_usuarios[df_usuarios['status'] == 'aprovado']
-        bloqueados = df_usuarios[df_usuarios['status'] == 'bloqueado']
 
-        st.markdown(f"### ⏳ Solicitantes Aguardando Aprovação ({len(pendentes)})")
+        st.markdown(f"<span class='titulo-secao'>⏳ Solicitantes Aguardando Aprovação ({len(pendentes)})</span>", unsafe_allow_html=True)
         
         if len(pendentes) == 0:
             st.info("Nenhuma solicitação de cadastro pendente no momento.")
@@ -621,7 +631,6 @@ if e_admin and tab_admin:
                     with c_wa:
                         st.markdown(f"📱 **WhatsApp:** `{user['contato']}`")
 
-                    # Gerar Link do WhatsApp
                     num_limpo = re.sub(r'\D', '', str(user['contato']))
                     msg = urllib.parse.quote(f"Olá {user['nome_completo']}, seu cadastro no Organizador de Planilhas foi APROVADO! Você já pode acessar a plataforma.")
                     link_wa = f"https://wa.me/{num_limpo}?text={msg}"
@@ -639,7 +648,7 @@ if e_admin and tab_admin:
 
                 st.markdown("---")
 
-        st.markdown(f"### 🟢 Usuários Ativos / Aprovados ({len(aprovados)})")
+        st.markdown(f"<span class='titulo-secao'>🟢 Usuários Ativos / Aprovados ({len(aprovados)})</span>", unsafe_allow_html=True)
         for idx, user in aprovados.iterrows():
             c_u, c_c, c_act = st.columns([3, 2, 2])
             c_u.write(f"**{user['nome_completo']}** (`@{user['usuario']}`)")
@@ -650,6 +659,6 @@ if e_admin and tab_admin:
                         atualizar_status_db(user['usuario'], 'excluir')
                         st.rerun()
 
-# --- RODAPÉ ---
+# --- RODAPÉ IDÊNTICO À SUA IMAGEM ---
 st.markdown("<br><br>---", unsafe_allow_html=True)
-st.markdown("<div style='text-align:center; color:#888;'>Desenvolvido por <strong>Diego Costa</strong></div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; color:#bbbbbb; font-size: 14px;'>Desenvolvido por <strong>Diego Costa</strong></div>", unsafe_allow_html=True)
