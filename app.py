@@ -175,6 +175,22 @@ st.markdown(f"""
         letter-spacing: 0.5px;
     }}
     
+    /* Cabeçalho do Estilo Tabela para Administrador */
+    .table-header {{
+        background-color: {COR_CARD};
+        padding: 10px 15px;
+        border-radius: 6px;
+        font-weight: bold;
+        color: {COR_LARANJA};
+        margin-bottom: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+    }}
+    .table-row {{
+        padding: 8px 15px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        align-items: center;
+    }}
+
     .stButton>button {{
         background: linear-gradient(90deg, {COR_LARANJA} 0%, #d88100 100%) !important;
         color: #FFFFFF !important;
@@ -619,13 +635,13 @@ with tab_ferramenta:
                     st.download_button("📥 BAIXAR PACOTE DE PLANILHAS (.ZIP)", zip_buffer, "Planilhas_Divididas.zip", use_container_width=True)
 
 # ==========================================
-# ABA 2: PAINEL DO ADMINISTRADOR
+# ABA 2: PAINEL DO ADMINISTRADOR (LAYOUT TABELA)
 # ==========================================
 if e_admin and tab_admin:
     with tab_admin:
-        st.markdown("<div style='font-size: 20px; font-weight: bold; color: #FFFFFF; margin-bottom: 10px;'>👑 Gestão de Usuários e Aprovações</div>", unsafe_allow_html=True)
+        st.markdown("<div style='font-size: 20px; font-weight: bold; color: #FFFFFF; margin-bottom: 12px;'>👑 Gestão de Usuários e Aprovações</div>", unsafe_allow_html=True)
         
-        # Alerta de aprovação + Link do WhatsApp
+        # Alerta com botão para WhatsApp
         if st.session_state.mensagem_aprovacao:
             st.success(st.session_state.mensagem_aprovacao["texto"])
             st.markdown(f"""
@@ -646,47 +662,59 @@ if e_admin and tab_admin:
                 st.rerun()
 
         df_usuarios = listar_todos_usuarios()
-        pendentes = df_usuarios[df_usuarios['status'] == 'pendente']
-        
-        # Bloco de Solicitações Pendentes
-        if len(pendentes) > 0:
-            st.markdown("### ⏳ Solicitações Pendentes")
-            for idx, user in pendentes.iterrows():
-                c_info, c_btn1, c_btn2 = st.columns([3, 1.2, 1.2])
-                c_info.write(f"**{user['nome_completo']}** (`@{user['usuario']}`) - Whats: `{user['contato']}`")
-                
-                num_limpo = re.sub(r'\D', '', str(user['contato']))
-                msg = urllib.parse.quote(f"Olá {user['nome_completo']}! Seu cadastro no Organizador de Planilhas foi APROVADO com sucesso. Você já pode fazer login e acessar o sistema!")
-                link_wa = f"https://wa.me/{num_limpo}?text={msg}"
 
-                if c_btn1.button("✅ Aprovar e Notificar", key=f"ap_{user['usuario']}"):
-                    atualizar_status_db(user['usuario'], 'aprovado')
-                    st.session_state.mensagem_aprovacao = {
-                        "texto": f"Usuário **{user['nome_completo']}** aprovado com sucesso!",
-                        "link_wa": link_wa
-                    }
-                    st.rerun()
-                    
-                if c_btn2.button("🚫 Recusar", key=f"rec_{user['usuario']}"):
-                    atualizar_status_db(user['usuario'], 'excluir')
-                    st.rerun()
-            st.markdown("---")
-            
-        # Bloco com a Lista Completa + Opção de EXCLUIR USUÁRIO
-        st.markdown("### 👥 Gestão e Exclusão de Usuários")
-        
+        # Cabeçalho no Estilo Tabela
+        c_nome, c_usr, c_contato, c_status, c_role, c_acao = st.columns([2.5, 1.8, 1.8, 1.2, 1, 2.2])
+        c_nome.markdown("<div class='table-header'>Nome Completo</div>", unsafe_allow_html=True)
+        c_usr.markdown("<div class='table-header'>Usuário</div>", unsafe_allow_html=True)
+        c_contato.markdown("<div class='table-header'>Contato</div>", unsafe_allow_html=True)
+        c_status.markdown("<div class='table-header'>Status</div>", unsafe_allow_html=True)
+        c_role.markdown("<div class='table-header'>Função</div>", unsafe_allow_html=True)
+        c_acao.markdown("<div class='table-header'>Ação</div>", unsafe_allow_html=True)
+
+        # Linhas da Tabela
         for idx, user in df_usuarios.iterrows():
-            col_usr_info, col_usr_del = st.columns([4, 1])
+            col1, col2, col3, col4, col5, col6 = st.columns([2.5, 1.8, 1.8, 1.2, 1, 2.2])
+            
+            col1.write(f"**{user['nome_completo']}**")
+            col2.write(f"`{user['usuario']}`")
+            col3.write(f"{user['contato']}")
             
             status_tag = "🟢 Aprovado" if user['status'] == 'aprovado' else "⏳ Pendente"
-            col_usr_info.write(f"**{user['nome_completo']}** (`@{user['usuario']}`) | {status_tag} | Role: `{user['role']}`")
-            
-            # Não permitir que o admin principal apague a própria conta por engano
-            if user['usuario'] != "diego.costa":
-                if col_usr_del.button("🗑️ Excluir", key=f"del_{user['usuario']}"):
-                    atualizar_status_db(user['usuario'], 'excluir')
-                    st.success(f"Usuário @{user['usuario']} excluído com sucesso!")
-                    st.rerun()
+            col4.write(status_tag)
+            col5.write(f"`{user['role']}`")
+
+            # Coluna de Ações em linha
+            with col6:
+                if user['status'] == 'pendente':
+                    btn_col1, btn_col2 = st.columns(2)
+                    
+                    num_limpo = re.sub(r'\D', '', str(user['contato']))
+                    msg = urllib.parse.quote(f"Olá {user['nome_completo']}! Seu cadastro no Organizador de Planilhas foi APROVADO com sucesso. Você já pode fazer login e acessar o sistema!")
+                    link_wa = f"https://wa.me/{num_limpo}?text={msg}"
+
+                    if btn_col1.button("✅", key=f"ap_{user['usuario']}", help="Aprovar Usuário"):
+                        atualizar_status_db(user['usuario'], 'aprovado')
+                        st.session_state.mensagem_aprovacao = {
+                            "texto": f"Usuário **{user['nome_completo']}** aprovado!",
+                            "link_wa": link_wa
+                        }
+                        st.rerun()
+                        
+                    if btn_col2.button("🚫", key=f"rec_{user['usuario']}", help="Recusar Solicitação"):
+                        atualizar_status_db(user['usuario'], 'excluir')
+                        st.rerun()
+                else:
+                    # Para usuários já aprovados/cadastrados
+                    if user['usuario'] != "diego.costa":
+                        if st.button("🗑️ Excluir", key=f"del_{user['usuario']}", help="Excluir Usuário do Banco de Dados"):
+                            atualizar_status_db(user['usuario'], 'excluir')
+                            st.success(f"Usuário @{user['usuario']} excluído!")
+                            st.rerun()
+                    else:
+                        st.caption("👑 Admin Principal")
+
+            st.markdown("<div style='margin-bottom: 5px;'></div>", unsafe_allow_html=True)
 
 # --- 7. RODAPÉ ---
 st.markdown("<br><br><hr style='border-color: rgba(255, 255, 255, 0.1);'>", unsafe_allow_html=True)
