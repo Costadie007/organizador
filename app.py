@@ -192,8 +192,8 @@ else:
     tab_ferramenta, = st.tabs(["⚙️ Ferramenta de Organização"])
     tab_admin = None
 
-# --- FUNÇÃO AVANÇADA DE LEITURA DE CÓDIGO DE BARRAS ---
-def extrair_codigos_imagem_avancado(cv_img):
+# --- MOTOR ULTRA AVANÇADO DE LEITURA MULTI-ESTÁGIO ---
+def extrair_codigos_imagem_extremo(cv_img):
     codigos_encontrados = set()
 
     def ler_zxing(img):
@@ -202,6 +202,7 @@ def extrair_codigos_imagem_avancado(cv_img):
             if r.valid and r.text:
                 codigos_encontrados.add(r.text.strip())
 
+    # Passo 1: Leitura na imagem original e em escala de cinza
     ler_zxing(cv_img)
     if codigos_encontrados:
         return list(codigos_encontrados)
@@ -211,34 +212,77 @@ def extrair_codigos_imagem_avancado(cv_img):
     if codigos_encontrados:
         return list(codigos_encontrados)
 
-    h, w = gray.shape[:2]
-    if max(h, w) > 1800:
-        escala = 1800.0 / max(h, w)
-        gray_small = cv2.resize(gray, (0, 0), fx=escala, fy=escala, interpolation=cv2.INTER_AREA)
-        ler_zxing(gray_small)
-        if codigos_encontrados:
-            return list(codigos_encontrados)
+    # Passo 2: Sharpening (Nitidez para fotos desfocadas)
+    kernel_sharpen = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+    sharp = cv2.filter2D(gray, -1, kernel_sharpen)
+    ler_zxing(sharp)
+    if codigos_encontrados:
+        return list(codigos_encontrados)
 
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    # Passo 3: CLAHE (Ajuste local de contraste para fotos com sombra)
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
     gray_contrast = clahe.apply(gray)
     ler_zxing(gray_contrast)
     if codigos_encontrados:
         return list(codigos_encontrados)
 
-    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    ler_zxing(thresh)
+    # Passo 4: Limiarização Adaptativa e Binarização de Otsu
+    _, thresh_otsu = cv2.threshold(gray_contrast, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    ler_zxing(thresh_otsu)
     if codigos_encontrados:
         return list(codigos_encontrados)
 
+    thresh_adapt = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    ler_zxing(thresh_adapt)
+    if codigos_encontrados:
+        return list(codigos_encontrados)
+
+    # Passo 5: Detecção de Região de Interesse (Auto-Crop na área do Código)
+    try:
+        grad_x = cv2.Sobel(gray, ddepth=cv2.CV_32F, dx=1, dy=0, ksize=-1)
+        grad_y = cv2.Sobel(gray, ddepth=cv2.CV_32F, dx=0, dy=1, ksize=-1)
+        gradient = cv2.subtract(grad_x, grad_y)
+        gradient = cv2.convertScaleAbs(gradient)
+        blurred = cv2.blur(gradient, (9, 9))
+        _, thresh_crop = cv2.threshold(blurred, 225, 255, cv2.THRESH_BINARY)
+        
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 7))
+        closed = cv2.morphologyEx(thresh_crop, cv2.MORPH_CLOSE, kernel)
+        cnts, _ = cv2.findContours(closed.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if cnts:
+            c = sorted(cnts, key=cv2.contourArea, reverse=True)[0]
+            rect = cv2.minAreaRect(c)
+            box = cv2.boxPoints(rect)
+            box = np.intp(box)
+            x, y, w, h = cv2.boundingRect(box)
+            # Crop com folga
+            pad = 20
+            h_img, w_img = gray.shape
+            crop = gray[max(0, y-pad):min(h_img, y+h+pad), max(0, x-pad):min(w_img, x+w+pad)]
+            if crop.size > 0:
+                ler_zxing(crop)
+                if codigos_encontrados:
+                    return list(codigos_encontrados)
+    except Exception:
+        pass
+
+    # Passo 6: Testar Várias Escalas (Resize Zoom In / Zoom Out)
+    for fx_fy in [1.5, 2.0, 0.5]:
+        resized = cv2.resize(gray_contrast, (0, 0), fx=fx_fy, fy=fx_fy, interpolation=cv2.INTER_CUBIC)
+        ler_zxing(resized)
+        if codigos_encontrados:
+            return list(codigos_encontrados)
+
+    # Passo 7: Rotações de 90°, 180° e 270° em todas as tentativas anteriores
     for rot in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_180, cv2.ROTATE_90_COUNTERCLOCKWISE]:
-        rot_img = cv2.rotate(gray, rot)
+        rot_img = cv2.rotate(gray_contrast, rot)
         ler_zxing(rot_img)
         if codigos_encontrados:
             return list(codigos_encontrados)
 
     return list(codigos_encontrados)
 
-# HELPER: TRATA O CÓDIGO PARA OS ÚLTIMOS 9 DÍGITOS
 def normalizar_codigo_9_digitos(val_raw):
     if val_raw is None:
         return ""
@@ -280,12 +324,10 @@ with tab_ferramenta:
         with col_destino:
             nome_coluna_foto = st.text_input("Nome da nova coluna para INSERIR A FOTO:", value="FOTO")
 
-        # Botão principal de varredura
-        if st.button("🚀 INICIAR LEITURA DAS FOTOS", use_container_width=True):
+        if st.button("🚀 INICIAR PROCESSAMENTO AUTOMÁTICO", use_container_width=True):
             st.session_state.mapa_codigo_imagem = {}
             st.session_state.fotos_pendentes = []
 
-            # 1. Carregar fotos
             lista_fotos_processar = []
             for f in arquivos_fotos:
                 if f.name.endswith(".zip"):
@@ -304,13 +346,13 @@ with tab_ferramenta:
 
             progresso = st.progress(0)
             status = st.empty()
-            status.write(f"🔍 Executando leitura automática em {len(lista_fotos_processar)} fotos...")
+            status.write(f"⚡ Processando {len(lista_fotos_processar)} fotos com motor de inteligência visual...")
 
             for idx, (pil_img, img_bytes, nome_f) in enumerate(lista_fotos_processar):
                 np_arr = np.frombuffer(img_bytes, np.uint8)
                 cv_img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
                 
-                codigos_lidos = extrair_codigos_imagem_avancado(cv_img) if cv_img is not None else []
+                codigos_lidos = extrair_codigos_imagem_extremo(cv_img) if cv_img is not None else []
                 
                 if codigos_lidos:
                     for cod in codigos_lidos:
@@ -322,12 +364,12 @@ with tab_ferramenta:
 
                 progresso.progress((idx + 1) / len(lista_fotos_processar))
 
-            status.success(f"✅ Leitura automática concluída! **{len(st.session_state.mapa_codigo_imagem)}** lidas com sucesso. **{len(st.session_state.fotos_pendentes)}** fotos precisam de verificação.")
+            status.success(f"✅ Leitura concluída! **{len(st.session_state.mapa_codigo_imagem)}** código(s) mapeado(s) automaticamente.")
 
-        # --- SEÇÃO DE MANUSEIO MANUAL PARA FOTOS NÃO LIDAS ---
+        # --- SEÇÃO DE EXCEÇÕES (Apenas para emergências) ---
         if "fotos_pendentes" in st.session_state and len(st.session_state.fotos_pendentes) > 0:
             st.markdown("---")
-            st.warning(f"⚠️ **{len(st.session_state.fotos_pendentes)} foto(s) não foram identificadas automaticamente.** Digite os últimos dígitos abaixo para incluir na planilha:")
+            st.warning(f"⚠️ Apenas **{len(st.session_state.fotos_pendentes)}** foto(s) de um total alto não puderam ser lidas automaticamente.")
 
             codigos_digitados = {}
             cols = st.columns(min(len(st.session_state.fotos_pendentes), 3))
@@ -335,11 +377,11 @@ with tab_ferramenta:
             for idx, (nome_f, img_obj) in enumerate(st.session_state.fotos_pendentes):
                 with cols[idx % 3]:
                     st.image(img_obj, caption=f"📄 {nome_f}", use_container_width=True)
-                    ent_code = st.text_input(f"Código para {nome_f}:", key=f"manual_{idx}", placeholder="Ex: 999888777")
+                    ent_code = st.text_input(f"Código ({nome_f}):", key=f"manual_{idx}", placeholder="Últimos 9 dígitos")
                     if ent_code.strip():
                         codigos_digitados[idx] = normalizar_codigo_9_digitos(ent_code)
 
-            if st.button("➕ Adicionar Códigos Manuais e Atualizar Lista", use_container_width=True):
+            if st.button("➕ Vincular exceções manuais", use_container_width=True):
                 removidos = []
                 for idx, cod_norm in codigos_digitados.items():
                     if cod_norm:
@@ -347,15 +389,14 @@ with tab_ferramenta:
                         st.session_state.mapa_codigo_imagem[cod_norm] = img_obj
                         removidos.append(idx)
                 
-                # Atualiza a lista de pendentes removendo as que foram corrigidas
                 st.session_state.fotos_pendentes = [item for i, item in enumerate(st.session_state.fotos_pendentes) if i not in removidos]
-                st.success("Códigos inseridos com sucesso!")
+                st.success("Exceções atualizadas!")
                 st.rerun()
 
-        # --- GERAÇÃO DA PLANILHA ---
+        # --- GERAÇÃO E DOWNLOAD DA PLANILHA ---
         if "mapa_codigo_imagem" in st.session_state and len(st.session_state.mapa_codigo_imagem) > 0:
             st.markdown("---")
-            if st.button("📊 APLECAR E GERAR PLANILHA FINAL COM AS FOTOS", use_container_width=True):
+            if st.button("📊 GERAR PLANILHA FINAL COM AS FOTOS", use_container_width=True):
                 wb = openpyxl.load_workbook(arquivo_excel)
                 ws = wb[nome_aba]
 
@@ -367,7 +408,7 @@ with tab_ferramenta:
                         break
 
                 if not col_idx_codigo:
-                    st.error(f"❌ Não foi possível localizar a coluna '{coluna_codigo}' na planilha.")
+                    st.error(f"❌ Coluna '{coluna_codigo}' não encontrada na planilha.")
                     st.stop()
 
                 col_idx_foto = ws.max_column + 1
@@ -401,7 +442,7 @@ with tab_ferramenta:
                 wb.save(output_excel)
                 output_excel.seek(0)
 
-                st.success(f"🎉 Processamento finalizado! **{vincularam}** fotos inseridas no Excel!")
+                st.success(f"🎉 **{vincularam}** fotos inseridas na planilha com sucesso!")
                 st.download_button(
                     label="📥 BAIXAR PLANILHA FINAL COM FOTOS",
                     data=output_excel,
