@@ -427,4 +427,4 @@ if e_admin and tab_admin:
 
 # --- RODAPÉ ---
 st.markdown("<br><br>---", unsafe_allow_html=True)
-st.markdown("<div style='text-align:center; color:#888;'>Desenvolvimento e Engenharia por <strong>Diego Costa</strong></div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; color:#888;'>Desenvolvido por <strong>Diego Costa</strong></div>", unsafe_allow_html=True)
