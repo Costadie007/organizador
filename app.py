@@ -203,7 +203,7 @@ with col_logo:
 with col_titulo:
     st.markdown("""
         <h1 style="margin:0; font-size: 32px;">Organizador de Planilhas Pro</h1>
-        <p style="margin:0; color:#bbbbbb !important;">Vincule fotos a planilhas Excel automaticamente através de Barcode, OCR e correspondência inteligente de dígitos.</p>
+        <p style="margin:0; color:#bbbbbb !important;">Vincule fotos a planilhas Excel automaticamente através de Barcode, OCR, Rotação e Nitidez Adaptativa.</p>
     """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -220,6 +220,15 @@ def extrair_apenas_digitos(texto):
     if texto is None:
         return ""
     return str(re.sub(r'\D', '', str(texto)))
+
+def aplicar_filtro_nitidez(img_np):
+    """Aplica filtro Unsharp Masking para melhorar a borda dos códigos/textos borrados."""
+    if img_np is None:
+        return None
+    kernel_nitidez = np.array([[0, -1, 0], 
+                               [-1, 5, -1], 
+                               [0, -1, 0]])
+    return cv2.filter2D(img_np, -1, kernel_nitidez)
 
 def tentar_decodificar_engines(img_np):
     if img_np is None:
@@ -262,6 +271,40 @@ def tentar_ocr_texto(img_np):
         pass
     return None
 
+def varrer_orientacao_imagem(cv_img):
+    """Aplica varreduras na imagem considerando filtros de nitidez, contraste e OCR."""
+    cods_encontrados = set()
+    if cv_img is None:
+        return cods_encontrados
+
+    # 1. Leitura Direta
+    cod = tentar_decodificar_engines(cv_img)
+    if cod:
+        cods_encontrados.add(cod)
+
+    # 2. Nitidez e Tons de Cinza
+    img_nitida = aplicar_filtro_nitidez(cv_img)
+    cinza = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY) if len(cv_img.shape) == 3 else cv_img
+    cinza_nitida = cv2.cvtColor(img_nitida, cv2.COLOR_BGR2GRAY) if len(img_nitida.shape) == 3 else img_nitida
+
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    cinza_clahe = clahe.apply(cinza)
+    _, otsu = cv2.threshold(cinza, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    for var in [img_nitida, cinza, cinza_nitida, cinza_clahe, otsu]:
+        c = tentar_decodificar_engines(var)
+        if c:
+            cods_encontrados.add(c)
+
+    # 3. Fallback com OCR
+    if HAS_OCR:
+        for var in [cv_img, cinza_nitida, cinza_clahe]:
+            c_ocr = tentar_ocr_texto(var)
+            if c_ocr:
+                cods_encontrados.add(c_ocr)
+
+    return cods_encontrados
+
 def ler_codigo_multi_camadas(cv_img, nome_arquivo=""):
     cods = set()
     
@@ -273,28 +316,22 @@ def ler_codigo_multi_camadas(cv_img, nome_arquivo=""):
     if cv_img is None:
         return list(cods)
 
-    # 2. Leitura Direta
-    cod = tentar_decodificar_engines(cv_img)
-    if cod:
-        cods.add(cod)
+    # 2. Varrer Orientação Original (0°)
+    cods.update(varrer_orientacao_imagem(cv_img))
 
-    # 3. Pré-processamento e variações
-    cinza = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY) if len(cv_img.shape) == 3 else cv_img
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    cinza_clahe = clahe.apply(cinza)
-    _, otsu = cv2.threshold(cinza, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    for var in [cinza, cinza_clahe, otsu]:
-        c = tentar_decodificar_engines(var)
-        if c:
-            cods.add(c)
-
-    # 4. Fallback com OCR
-    if HAS_OCR:
-        for var in [cv_img, cinza_clahe]:
-            c_ocr = tentar_ocr_texto(var)
-            if c_ocr:
-                cods.add(c_ocr)
+    # 3. Rotação Automática (90°, 180°, 270°) caso não tenha achado nada ainda
+    if not cods:
+        rotacoes = [
+            cv2.ROTATE_90_CLOCKWISE,
+            cv2.ROTATE_180,
+            cv2.ROTATE_90_COUNTERCLOCKWISE
+        ]
+        for angulo in rotacoes:
+            img_rotacionada = cv2.rotate(cv_img, angulo)
+            cods_rot = varrer_orientacao_imagem(img_rotacionada)
+            if cods_rot:
+                cods.update(cods_rot)
+                break  # Para a rotação se encontrar código válido
 
     return list(cods)
 
@@ -360,7 +397,7 @@ with tab_ferramenta:
             banco_fotos_digitos = []
             status_leitura = st.empty()
             prog_bar = st.progress(0)
-            status_leitura.write(f"🔍 Executando varredura em {len(lista_fotos)} imagens...")
+            status_leitura.write(f"🔍 Executando varredura com Nitidez e Rotação em {len(lista_fotos)} imagens...")
 
             for idx, (nome_f, pil_img, img_bytes) in enumerate(lista_fotos):
                 np_arr = np.frombuffer(img_bytes, np.uint8)
@@ -385,8 +422,8 @@ with tab_ferramenta:
                 if not cod_excel_num:
                     continue
 
-                d4_excel = cod_excel_num[-4:] if len(cod_excel_num) >= 4 else cod_excel_num.zfill(4)
-                d8_excel = cod_excel_num[-8:] if len(cod_excel_num) >= 8 else cod_excel_num.zfill(8)
+                d4_excel = cod_excel_num[-4:] if len(cod_excel_num) >= 4 else cod_excel_num
+                d8_excel = cod_excel_num[-8:] if len(cod_excel_num) >= 8 else cod_excel_num
 
                 # Busca por 4 dígitos
                 matches_4d = []
@@ -604,4 +641,4 @@ if e_admin and tab_admin:
 
 # --- RODAPÉ ---
 st.markdown("<br><br>---", unsafe_allow_html=True)
-st.markdown("<div style='text-align:center; color:#888;'>Desenvolvido por <strong>Diego Costa</strong></div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; color:#888;'>Desenvolvimento e Engenharia por <strong>Diego Costa</strong></div>", unsafe_allow_html=True)
