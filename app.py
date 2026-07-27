@@ -123,7 +123,7 @@ COR_FUNDO_CARD = "#333230"
 COR_TEXTO = "#FFFFFF"
 
 st.set_page_config(
-    page_title="Organizador Pro Ultra - Portal",
+    page_title="Organizador de Planilhas",
     page_icon="📊",
     layout="wide"
 )
@@ -221,7 +221,7 @@ if not st.session_state.autenticado:
                         elif dados_usr["status"] == "pendente":
                             st.warning("⏳ Seu cadastro está em análise pelo administrador. Você receberá um aviso assim que for aprovado!")
                         else:
-                            st.error("🚫 Acesso bloqueado. Entre em contato com o suporte.")
+                            st.error("🚫 Acesso bloqueado. Entre em contato com o suporte, (61) 99669-****")
                     else:
                         st.error("Usuário ou senha incorretos.")
 
@@ -652,4 +652,4 @@ if e_admin and tab_admin:
 
 # --- RODAPÉ ---
 st.markdown("<br><br>---", unsafe_allow_html=True)
-st.markdown("<div style='text-align:center; color:#888;'>Desenvolvimento e Engenharia por <strong>Diego Costa</strong></div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; color:#888;'>Desenvolvido por <strong>Diego Costa</strong></div>", unsafe_allow_html=True)
