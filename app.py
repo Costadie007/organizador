@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import openpyxl
 from openpyxl.drawing.image import Image as OpenpyxlImage
-from pyzbar.pyzbar import decode
+import zxingcpp
 from PIL import Image
 import os
 import zipfile
@@ -27,13 +27,10 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- ESTILIZAÇÃO CSS (OCULTA BARRA SUPERIOR, GITHUB, EDIÇÃO E MENU DE 3 PONTOS) ---
+# --- ESTILIZAÇÃO CSS (OCULTA BARRA SUPERIOR, GITHUB, EDIÇÃO E MENU) ---
 st.markdown(f"""
     <style>
-    [data-testid="stToolbar"], 
-    [data-testid="stHeader"], 
-    header, 
-    #MainMenu {{
+    [data-testid="stToolbar"], [data-testid="stHeader"], header, #MainMenu {{
         display: none !important;
         visibility: hidden !important;
         height: 0px !important;
@@ -51,9 +48,7 @@ st.markdown(f"""
         padding-bottom: 2rem;
         max-width: 92%;
     }}
-    h1, h2, h3, h4, h5, h6, p, span, label {{
-        color: {COR_TEXTO} !important;
-    }}
+    h1, h2, h3, h4, h5, h6, p, span, label {{ color: {COR_TEXTO} !important; }}
     .stButton>button {{
         background: linear-gradient(90deg, {COR_LARANJA} 0%, #d88100 100%) !important;
         color: #FFFFFF !important;
@@ -197,6 +192,62 @@ else:
     tab_ferramenta, = st.tabs(["⚙️ Ferramenta de Organização"])
     tab_admin = None
 
+# --- FUNÇÃO AVANÇADA DE LEITURA DE CÓDIGO DE BARRAS ---
+def extrair_codigos_imagem_avancado(cv_img):
+    """
+    Tenta ler o código de barras aplicando vários pré-processamentos e rotações na foto.
+    """
+    codigos_encontrados = set()
+
+    def ler_zxing(img):
+        results = zxingcpp.read_barcodes(img)
+        for r in results:
+            if r.valid and r.text:
+                codigos_encontrados.add(r.text.strip())
+
+    # 1. Tentativa Direta na Imagem Original
+    ler_zxing(cv_img)
+    if codigos_encontrados:
+        return list(codigos_encontrados)
+
+    # Convertendo para Escala de Cinza
+    gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY) if len(cv_img.shape) == 3 else cv_img
+    ler_zxing(gray)
+    if codigos_encontrados:
+        return list(codigos_encontrados)
+
+    # 2. Redimensionar se for muito grande (Fotos de celular > 3000px às vezes falham)
+    h, w = gray.shape[:2]
+    if max(h, w) > 1800:
+        escala = 1800.0 / max(h, w)
+        gray_small = cv2.resize(gray, (0, 0), fx=escala, fy=escala, interpolation=cv2.INTER_AREA)
+        ler_zxing(gray_small)
+        if codigos_encontrados:
+            return list(codigos_encontrados)
+
+    # 3. Tratamento de Contraste (CLAHE)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    gray_contrast = clahe.apply(gray)
+    ler_zxing(gray_contrast)
+    if codigos_encontrados:
+        return list(codigos_encontrados)
+
+    # 4. Binarização / Otsu (Ótimo para fotos com sombras)
+    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    ler_zxing(thresh)
+    if codigos_encontrados:
+        return list(codigos_encontrados)
+
+    # 5. Tentativa com Rotações (90, 180 e 270 graus)
+    for rot in [cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_180, cv2.ROTATE_90_COUNTERCLOCKWISE]:
+        rot_img = cv2.rotate(gray, rot)
+        ler_zxing(rot_img)
+        if codigos_encontrados:
+            return list(codigos_encontrados)
+
+    return list(codigos_encontrados)
+
+
 # ==========================================
 # ABA 1: FERRAMENTA PRINCIPAL
 # ==========================================
@@ -219,7 +270,6 @@ with tab_ferramenta:
         sheet_names = wb_temp.sheetnames
         nome_aba = st.selectbox("Selecione a aba da planilha:", sheet_names)
         
-        # Lê cabeçalho com pandas para escolher a coluna do código
         df_temp = pd.read_excel(arquivo_excel, sheet_name=nome_aba)
         colunas_planilha = list(df_temp.columns)
         
@@ -235,9 +285,9 @@ with tab_ferramenta:
             status = st.empty()
 
             # 1. Processar e Extrair Fotos
-            lista_fotos_processar = [] # Guarda tuplas: (pil_image, bytes_image, nome)
+            lista_fotos_processar = []
 
-            status.write("📂 Extraindo e preparando pacote de imagens...")
+            status.write("📂 Extraindo pacote de imagens...")
             for f in arquivos_fotos:
                 if f.name.endswith(".zip"):
                     with zipfile.ZipFile(f) as z:
@@ -251,85 +301,81 @@ with tab_ferramenta:
                     pil_img = Image.open(io.BytesIO(img_bytes))
                     lista_fotos_processar.append((pil_img, img_bytes, f.name))
 
-            status.write(f"🔍 Leitura de códigos de barra em {len(lista_fotos_processar)} fotos...")
+            status.write(f"🔍 Leitura otimizada em {len(lista_fotos_processar)} fotos...")
 
-            # Dicionario mapeando: { codigo_lido: imagem_pil }
             mapa_codigo_imagem = {}
             nao_identificados = 0
 
             for idx, (pil_img, img_bytes, nome_f) in enumerate(lista_fotos_processar):
-                # Converter para OpenCV para leitura de código de barras
                 np_arr = np.frombuffer(img_bytes, np.uint8)
                 cv_img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
                 
-                codigos_encontrados = decode(cv_img)
-                if codigos_encontrados:
-                    for barcode in codigos_encontrados:
-                        codigo_texto = barcode.data.decode('utf-8').strip()
-                        mapa_codigo_imagem[str(codigo_texto)] = pil_img
+                if cv_img is not None:
+                    # Executa função com múltiplos filtros e rotações
+                    codigos_lidos = extrair_codigos_imagem_avancado(cv_img)
+                    
+                    if codigos_lidos:
+                        for cod in codigos_lidos:
+                            mapa_codigo_imagem[str(cod)] = pil_img
+                    else:
+                        nao_identificados += 1
                 else:
                     nao_identificados += 1
 
                 progresso.progress((idx + 1) / len(lista_fotos_processar) * 0.5)
 
-            status.write(f"✅ {len(mapa_codigo_imagem)} códigos de barra identificados com sucesso! ({nao_identificados} sem código)")
+            status.write(f"✅ **{len(mapa_codigo_imagem)}** código(s) identificado(s)! ({nao_identificados} fotos não identificadas)")
 
-            # 2. Carregar Excel via openpyxl e Inserir Imagens
+            # 2. Carregar Excel e Inserir Fotos
             wb = openpyxl.load_workbook(arquivo_excel)
             ws = wb[nome_aba]
 
-            # Achar o índice numérico da coluna de código
             col_idx_codigo = None
             for col in range(1, ws.max_column + 1):
                 if str(ws.cell(row=1, column=col).value).strip() == str(coluna_codigo).strip():
                     col_idx_codigo = col
                     break
 
-            # Criar coluna para fotos no final
             col_idx_foto = ws.max_column + 1
             ws.cell(row=1, column=col_idx_foto).value = nome_coluna_foto
 
             vincularam = 0
-
-            # Percorrer as linhas do Excel
             tot_rows = ws.max_row
+
             for row in range(2, tot_rows + 1):
                 valor_celula = str(ws.cell(row=row, column=col_idx_codigo).value).strip()
                 
-                # Se o código da célula estiver no nosso mapa de fotos
+                # Se o valor for formatado como float (ex: 12345.0), limpa
+                if valor_celula.endswith(".0"):
+                    valor_celula = valor_celula[:-2]
+
                 if valor_celula in mapa_codigo_imagem:
-                    pil_img = mapa_codigo_imagem[valor_celula]
+                    pil_img = mapa_codigo_imagem[valor_celula].copy()
                     
-                    # Redimensionar mantendo proporção para caber na célula (Ex: altura 80px)
-                    pil_img.thumbnail((120, 80))
+                    # Redimensiona mantendo proporção
+                    pil_img.thumbnail((130, 80))
                     
-                    # Salvar temporariamente na memória
                     img_byte_arr = io.BytesIO()
                     pil_img.save(img_byte_arr, format='PNG')
                     
-                    # Inserir no Excel
                     img_excel = OpenpyxlImage(img_byte_arr)
                     cell_address = ws.cell(row=row, column=col_idx_foto).coordinate
                     ws.add_image(img_excel, cell_address)
                     
-                    # Ajustar altura da linha para caber a foto
                     ws.row_dimensions[row].height = 65
                     vincularam += 1
 
                 progresso.progress(0.5 + (row / tot_rows * 0.5))
 
-            # Ajustar largura da coluna da foto
             col_letter = openpyxl.utils.get_column_letter(col_idx_foto)
             ws.column_dimensions[col_letter].width = 18
 
-            # Salvar Excel final na memória
             output_excel = io.BytesIO()
             wb.save(output_excel)
             output_excel.seek(0)
 
-            status.success(f"🎉 Processamento concluído! {vincularam} fotos foram anexadas às linhas correspondentes.")
+            status.success(f"🎉 Processamento concluído! **{vincularam}** fotos foram vinculadas com sucesso!")
 
-            # Botão para Download do Excel
             st.download_button(
                 label="📥 BAIXAR PLANILHA ATUALIZADA COM AS FOTOS",
                 data=output_excel,
