@@ -203,7 +203,7 @@ with col_logo:
 with col_titulo:
     st.markdown("""
         <h1 style="margin:0; font-size: 32px;">Organizador de Planilhas Pro</h1>
-        <p style="margin:0; color:#bbbbbb !important;">Vincule fotos a planilhas Excel automaticamente através de Barcode, OCR, Rotação e Nitidez Adaptativa.</p>
+        <p style="margin:0; color:#bbbbbb !important;">Vincule fotos a planilhas Excel automaticamente por Barcode/OCR e atribua as imagens restantes manualmente.</p>
     """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -222,7 +222,6 @@ def extrair_apenas_digitos(texto):
     return str(re.sub(r'\D', '', str(texto)))
 
 def aplicar_filtro_nitidez(img_np):
-    """Aplica filtro Unsharp Masking para melhorar a borda dos códigos/textos borrados."""
     if img_np is None:
         return None
     kernel_nitidez = np.array([[0, -1, 0], 
@@ -272,17 +271,14 @@ def tentar_ocr_texto(img_np):
     return None
 
 def varrer_orientacao_imagem(cv_img):
-    """Aplica varreduras na imagem considerando filtros de nitidez, contraste e OCR."""
     cods_encontrados = set()
     if cv_img is None:
         return cods_encontrados
 
-    # 1. Leitura Direta
     cod = tentar_decodificar_engines(cv_img)
     if cod:
         cods_encontrados.add(cod)
 
-    # 2. Nitidez e Tons de Cinza
     img_nitida = aplicar_filtro_nitidez(cv_img)
     cinza = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY) if len(cv_img.shape) == 3 else cv_img
     cinza_nitida = cv2.cvtColor(img_nitida, cv2.COLOR_BGR2GRAY) if len(img_nitida.shape) == 3 else img_nitida
@@ -296,7 +292,6 @@ def varrer_orientacao_imagem(cv_img):
         if c:
             cods_encontrados.add(c)
 
-    # 3. Fallback com OCR
     if HAS_OCR:
         for var in [cv_img, cinza_nitida, cinza_clahe]:
             c_ocr = tentar_ocr_texto(var)
@@ -307,8 +302,6 @@ def varrer_orientacao_imagem(cv_img):
 
 def ler_codigo_multi_camadas(cv_img, nome_arquivo=""):
     cods = set()
-    
-    # 1. Tenta pegar números do próprio nome do arquivo
     digs_nome = extrair_apenas_digitos(nome_arquivo)
     if digs_nome:
         cods.add(digs_nome)
@@ -316,10 +309,8 @@ def ler_codigo_multi_camadas(cv_img, nome_arquivo=""):
     if cv_img is None:
         return list(cods)
 
-    # 2. Varrer Orientação Original (0°)
     cods.update(varrer_orientacao_imagem(cv_img))
 
-    # 3. Rotação Automática (90°, 180°, 270°) caso não tenha achado nada ainda
     if not cods:
         rotacoes = [
             cv2.ROTATE_90_CLOCKWISE,
@@ -331,7 +322,7 @@ def ler_codigo_multi_camadas(cv_img, nome_arquivo=""):
             cods_rot = varrer_orientacao_imagem(img_rotacionada)
             if cods_rot:
                 cods.update(cods_rot)
-                break  # Para a rotação se encontrar código válido
+                break
 
     return list(cods)
 
@@ -373,9 +364,16 @@ with tab_ferramenta:
         with col_c2:
             nome_coluna_foto = st.text_input("Nome da coluna para INSERIR A FOTO:", value="FOTO")
 
+        # Garante a lista de códigos disponíveis na planilha
+        codigos_excel_disponiveis = [
+            extrair_apenas_digitos(val) for val in df_temp[coluna_sgp].dropna().unique()
+            if extrair_apenas_digitos(val) != ""
+        ]
+
         if st.button("🚀 INICIAR PROCESSAMENTO DAS FOTOS E PLANILHA", use_container_width=True):
             st.session_state.mapa_codigo_imagem = {}
             st.session_state.conflitos_pendentes = []
+            st.session_state.fotos_nao_identificadas = []
 
             # Carrega arquivos de imagem
             lista_fotos = []
@@ -397,7 +395,7 @@ with tab_ferramenta:
             banco_fotos_digitos = []
             status_leitura = st.empty()
             prog_bar = st.progress(0)
-            status_leitura.write(f"🔍 Executando varredura com Nitidez e Rotação em {len(lista_fotos)} imagens...")
+            status_leitura.write(f"🔍 Varrendo {len(lista_fotos)} imagens...")
 
             for idx, (nome_f, pil_img, img_bytes) in enumerate(lista_fotos):
                 np_arr = np.frombuffer(img_bytes, np.uint8)
@@ -414,6 +412,7 @@ with tab_ferramenta:
 
             # Cruzamento Inteligente
             vincularam_auto = 0
+            fotos_usadas = set()
 
             for idx, row_data in df_temp.iterrows():
                 val_raw = row_data[coluna_sgp]
@@ -425,7 +424,6 @@ with tab_ferramenta:
                 d4_excel = cod_excel_num[-4:] if len(cod_excel_num) >= 4 else cod_excel_num
                 d8_excel = cod_excel_num[-8:] if len(cod_excel_num) >= 8 else cod_excel_num
 
-                # Busca por 4 dígitos
                 matches_4d = []
                 for foto in banco_fotos_digitos:
                     for d in foto["digitos_list"]:
@@ -435,9 +433,9 @@ with tab_ferramenta:
 
                 if len(matches_4d) == 1:
                     st.session_state.mapa_codigo_imagem[cod_excel_num] = matches_4d[0]["pil_img"]
+                    fotos_usadas.add(matches_4d[0]["nome"])
                     vincularam_auto += 1
                 elif len(matches_4d) > 1:
-                    # Desempate por 8 dígitos
                     matches_8d = []
                     for foto in matches_4d:
                         for d in foto["digitos_list"]:
@@ -447,6 +445,7 @@ with tab_ferramenta:
                     
                     if len(matches_8d) == 1:
                         st.session_state.mapa_codigo_imagem[cod_excel_num] = matches_8d[0]["pil_img"]
+                        fotos_usadas.add(matches_8d[0]["nome"])
                         vincularam_auto += 1
                     else:
                         st.session_state.conflitos_pendentes.append({
@@ -454,12 +453,21 @@ with tab_ferramenta:
                             "opcoes_fotos": matches_8d if len(matches_8d) > 0 else matches_4d
                         })
 
-            status_leitura.success(f"✅ Processamento concluído! **{vincularam_auto}** fotos vinculadas automaticamente. Conflitos para validar: **{len(st.session_state.conflitos_pendentes)}**.")
+            # Identifica fotos sem correspondência para atribuição manual
+            for foto in banco_fotos_digitos:
+                if foto["nome"] not in fotos_usadas:
+                    st.session_state.fotos_nao_identificadas.append(foto)
 
-        # --- CONFLITOS PENDENTES ---
+            status_leitura.success(
+                f"✅ **{vincularam_auto}** fotos vinculadas automaticamente! "
+                f"Conflitos: **{len(st.session_state.conflitos_pendentes)}** | "
+                f"Fotos não identificadas: **{len(st.session_state.fotos_nao_identificadas)}**"
+            )
+
+        # --- SEÇÃO 1: CONFLITOS PENDENTES ---
         if "conflitos_pendentes" in st.session_state and len(st.session_state.conflitos_pendentes) > 0:
             st.markdown("---")
-            st.warning(f"⚠️ **{len(st.session_state.conflitos_pendentes)} item(ns)** possuem ambiguidades nos dígitos. Desempate manualmente:")
+            st.warning(f"⚠️ **{len(st.session_state.conflitos_pendentes)} item(ns)** possuem duplicidade de dígitos. Escolha a foto correta:")
 
             respostas_conflitos = {}
             for idx, conflito in enumerate(st.session_state.conflitos_pendentes):
@@ -481,11 +489,46 @@ with tab_ferramenta:
                         if f["nome"] == escolha:
                             respostas_conflitos[conflito['codigo_excel']] = f["pil_img"]
 
-            if st.button("➕ Confirmar Seleções Manuais", use_container_width=True):
+            if st.button("➕ Confirmar Desempates", use_container_width=True):
                 for cod, img_pil in respostas_conflitos.items():
                     st.session_state.mapa_codigo_imagem[cod] = img_pil
                 st.session_state.conflitos_pendentes = [c for c in st.session_state.conflitos_pendentes if c['codigo_excel'] not in respostas_conflitos]
-                st.success("Opções salvas com sucesso!")
+                st.success("Conflitos resolvidos!")
+                st.rerun()
+
+        # --- SEÇÃO 2: ATRIBUIÇÃO MANUAL DE FOTOS NÃO IDENTIFICADAS ---
+        if "fotos_nao_identificadas" in st.session_state and len(st.session_state.fotos_nao_identificadas) > 0:
+            st.markdown("---")
+            st.markdown(f"### 🖼️ Galeria de Fotos Não Identificadas ({len(st.session_state.fotos_nao_identificadas)})")
+            st.info("O leitor automático não identificou o código nas fotos abaixo. Vincule-as aos códigos da planilha selecionando na lista:")
+
+            codigos_nao_mapeados = [
+                c for c in codigos_excel_disponiveis 
+                if c not in st.session_state.mapa_codigo_imagem
+            ]
+
+            respostas_manuais = {}
+            grid_cols = st.columns(3)
+
+            for idx, foto_obj in enumerate(st.session_state.fotos_nao_identificadas):
+                with grid_cols[idx % 3]:
+                    st.image(foto_obj["pil_img"], caption=foto_obj["nome"], use_container_width=True)
+                    
+                    cod_escolhido = st.selectbox(
+                        f"Código do Excel:",
+                        options=["-- Ignorar --"] + codigos_nao_mapeados,
+                        key=f"man_{idx}"
+                    )
+                    if cod_escolhido != "-- Ignorar --":
+                        respostas_manuais[foto_obj["nome"]] = (cod_escolhido, foto_obj["pil_img"])
+
+            if st.button("📌 Salvar Fotos Atribuidas Manualmente", use_container_width=True):
+                for nome_f, (cod, img_pil) in respostas_manuais.items():
+                    st.session_state.mapa_codigo_imagem[cod] = img_pil
+                st.session_state.fotos_nao_identificadas = [
+                    f for f in st.session_state.fotos_nao_identificadas if f["nome"] not in respostas_manuais
+                ]
+                st.success("Fotos vinculadas com sucesso!")
                 st.rerun()
 
         # --- GERAÇÃO DA PLANILHA E MENU DE DIVISÃO ---
