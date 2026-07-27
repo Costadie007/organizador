@@ -5,7 +5,7 @@ import pandas as pd
 import openpyxl
 from openpyxl.drawing.image import Image as OpenpyxlImage
 import zxingcpp
-from PIL import Image
+from PIL import Image, ImageOps
 import os
 import zipfile
 import io
@@ -213,7 +213,7 @@ def extrair_codigos_imagem_avancado(cv_img):
     if codigos_encontrados:
         return list(codigos_encontrados)
 
-    # 3. Redimensionar se for muito grande (Fotos pesadas)
+    # 3. Redimensionar se for muito grande
     h, w = gray.shape[:2]
     if max(h, w) > 1800:
         escala = 1800.0 / max(h, w)
@@ -229,7 +229,7 @@ def extrair_codigos_imagem_avancado(cv_img):
     if codigos_encontrados:
         return list(codigos_encontrados)
 
-    # 5. Binarização / Otsu (Remoção de sombras)
+    # 5. Binarização / Otsu
     _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     ler_zxing(thresh)
     if codigos_encontrados:
@@ -292,40 +292,40 @@ with tab_ferramenta:
                             if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
                                 img_bytes = z.read(filename)
                                 pil_img = Image.open(io.BytesIO(img_bytes))
+                                pil_img = ImageOps.exif_transpose(pil_img) # Corrige orientação do celular
                                 lista_fotos_processar.append((pil_img, img_bytes, filename))
                 else:
                     img_bytes = f.read()
                     pil_img = Image.open(io.BytesIO(img_bytes))
+                    pil_img = ImageOps.exif_transpose(pil_img) # Corrige orientação do celular
                     lista_fotos_processar.append((pil_img, img_bytes, f.name))
 
             status.write(f"🔍 Leitura otimizada em {len(lista_fotos_processar)} fotos...")
 
             mapa_codigo_imagem = {}
-            nao_identificados = 0
+            fotos_falhas = [] # Lista para salvar fotos que não puderam ser lidas
 
             for idx, (pil_img, img_bytes, nome_f) in enumerate(lista_fotos_processar):
                 np_arr = np.frombuffer(img_bytes, np.uint8)
                 cv_img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
                 
-                if cv_img is not None:
-                    codigos_lidos = extrair_codigos_imagem_avancado(cv_img)
-                    
-                    if codigos_lidos:
-                        for cod in codigos_lidos:
-                            # Trata texto e pega APENAS OS ÚLTIMOS 9 DÍGITOS
-                            cod_bruto = str(cod).strip().split('.')[0]
-                            cod_numerico = ''.join(filter(str.isdigit, cod_bruto))
-                            cod_9_digitos = cod_numerico[-9:] if len(cod_numerico) >= 9 else cod_numerico.zfill(9)
-                            
-                            mapa_codigo_imagem[cod_9_digitos] = pil_img
-                    else:
-                        nao_identificados += 1
+                codigos_lidos = extrair_codigos_imagem_avancado(cv_img) if cv_img is not None else []
+                
+                if codigos_lidos:
+                    for cod in codigos_lidos:
+                        # Extrai APENAS OS ÚLTIMOS 9 DÍGITOS
+                        cod_bruto = str(cod).strip().split('.')[0]
+                        cod_numerico = ''.join(filter(str.isdigit, cod_bruto))
+                        cod_9_digitos = cod_numerico[-9:] if len(cod_numerico) >= 9 else cod_numerico.zfill(9)
+                        
+                        mapa_codigo_imagem[cod_9_digitos] = pil_img
                 else:
-                    nao_identificados += 1
+                    # Salva a imagem que falhou na leitura
+                    fotos_falhas.append((nome_f, pil_img))
 
                 progresso.progress((idx + 1) / len(lista_fotos_processar) * 0.5)
 
-            status.write(f"✅ **{len(mapa_codigo_imagem)}** código(s) de 9 dígitos mapeado(s) nas fotos! ({nao_identificados} fotos sem leitura)")
+            status.write(f"✅ **{len(mapa_codigo_imagem)}** código(s) de 9 dígitos mapeado(s) nas fotos!")
 
             # 2. Carregar Excel e Inserir Fotos
             wb = openpyxl.load_workbook(arquivo_excel)
@@ -347,7 +347,6 @@ with tab_ferramenta:
 
             vincularam = 0
             tot_rows = ws.max_row
-            
             codigos_excel_debug = []
 
             for row in range(2, tot_rows + 1):
@@ -355,7 +354,6 @@ with tab_ferramenta:
                 if raw_val is None:
                     continue
                 
-                # Trata o valor do Excel e extrai APENAS OS ÚLTIMOS 9 DÍGITOS
                 val_bruto = str(raw_val).strip().split('.')[0]
                 val_numerico = ''.join(filter(str.isdigit, val_bruto))
                 
@@ -365,10 +363,8 @@ with tab_ferramenta:
                 codigo_excel_9 = val_numerico[-9:] if len(val_numerico) >= 9 else val_numerico.zfill(9)
                 codigos_excel_debug.append(codigo_excel_9)
 
-                # Cruzamento das chaves de 9 dígitos
                 if codigo_excel_9 in mapa_codigo_imagem:
                     pil_img = mapa_codigo_imagem[codigo_excel_9].copy()
-                    
                     pil_img.thumbnail((130, 80))
                     
                     img_byte_arr = io.BytesIO()
@@ -390,6 +386,7 @@ with tab_ferramenta:
             wb.save(output_excel)
             output_excel.seek(0)
 
+            # --- RESULTADO DO PROCESSAMENTO ---
             if vincularam > 0:
                 status.success(f"🎉 Processamento concluído! **{vincularam}** fotos foram vinculadas com sucesso!")
                 st.download_button(
@@ -400,12 +397,19 @@ with tab_ferramenta:
                     use_container_width=True
                 )
             else:
-                status.warning("⚠️ Nenhuma foto foi vinculada! Veja os códigos de 9 dígitos lidos abaixo para diagnosticar:")
-                col_dbg1, col_dbg2 = st.columns(2)
-                with col_dbg1:
-                    st.write("**Chaves lidas nas Fotos (9 dígitos):**", list(mapa_codigo_imagem.keys()))
-                with col_dbg2:
-                    st.write("**Chaves lidas no Excel (Primeiros 10 registros):**", codigos_excel_debug[:10])
+                status.warning("⚠️ Nenhuma foto foi vinculada! Verifique as chaves lidas.")
+
+            # --- PAINEL EXCLUSIVO PARA FOTOS QUE FALHARAM ---
+            if fotos_falhas:
+                st.markdown("---")
+                st.subheader(f"⚠️ Atenção: {len(fotos_falhas)} foto(s) precisam de verificação manual")
+                st.write("O código de barras **não pôde ser lido automaticamente** nas seguintes fotos. Verifique a iluminação ou se o código está desfocado:")
+
+                # Exibe miniatura das fotos que falharam
+                cols_falha = st.columns(min(len(fotos_falhas), 4))
+                for i, (nome_arq, img_obj) in enumerate(fotos_falhas):
+                    with cols_falha[i % 4]:
+                        st.image(img_obj, caption=f"📄 {nome_arq}", use_container_width=True)
 
 # ==========================================
 # ABA 2: PAINEL DE ADMIN
