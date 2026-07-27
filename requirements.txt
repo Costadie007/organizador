@@ -4,4 +4,4 @@ numpy
 pandas
 openpyxl
 Pillow
-pyzbar
+zxing-cpp
