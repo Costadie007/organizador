@@ -20,6 +20,7 @@ DB_NAME = "sistema_usuarios.db"
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
+    # Cria a tabela se for um banco novo
     c.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             usuario TEXT PRIMARY KEY,
@@ -31,6 +32,13 @@ def init_db():
             data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    
+    # MIGRAÇÃO AUTOMÁTICA: Adiciona a coluna 'email' se a tabela já existia sem ela
+    c.execute("PRAGMA table_info(usuarios)")
+    colunas = [col[1] for col in c.fetchall()]
+    if "email" not in colunas:
+        c.execute("ALTER TABLE usuarios ADD COLUMN email TEXT")
+
     c.execute("SELECT * FROM usuarios WHERE usuario = ?", ("diego.costa",))
     if not c.fetchone():
         c.execute('''
