@@ -131,7 +131,7 @@ try:
 except Exception:
     HAS_OCR = False
 
-# --- 3. CONFIGURAÇÃO VISUAL & ESTILOS PADRONIZADOS ---
+# --- 3. CONFIGURAÇÃO VISUAL & ESTILOS ---
 st.set_page_config(
     page_title="Organizador de Planilhas",
     page_icon="📊",
@@ -330,11 +330,10 @@ with col_titulo:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# --- FUNÇÕES DE LEITURA E PROCESSAMENTO AVANÇADO ---
+# --- FUNÇÕES DE LEITURA E PROCESSAMENTO ULTRA POTENCIADO ---
 def extrair_apenas_digitos(texto):
     if texto is None: return ""
     digits = re.sub(r'\D', '', str(texto))
-    # Normalização Alta Precisão: Remove zeros à esquerda (ex: 00123 -> 123)
     return digits.lstrip('0')
 
 def limpar_texto_codigo(codigo_bruto):
@@ -343,34 +342,36 @@ def limpar_texto_codigo(codigo_bruto):
     limpo = re.sub(r'[^a-zA-Z0-9]', '', limpo)
     return limpo if len(limpo) >= 3 else None
 
-def gerar_variacoes_imagem_alta_precisao(cv_img):
+def gerar_variacoes_imagem_super_ocr(cv_img):
     variacoes = []
     if cv_img is None: return variacoes
     h, w = cv_img.shape[:2]
     
-    # Redimensiona mantendo proporção ideal para OCR
-    if max(h, w) > 2000:
-        escala = 2000 / max(h, w)
+    # Redimensiona mantendo proporção ideal alta
+    if max(h, w) < 1200:
+        cv_img = cv2.resize(cv_img, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
+    elif max(h, w) > 2200:
+        escala = 2200 / max(h, w)
         cv_img = cv2.resize(cv_img, (int(w * escala), int(h * escala)), interpolation=cv2.INTER_AREA)
 
     variacoes.append(cv_img)
     cinza = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY) if len(cv_img.shape) == 3 else cv_img
     variacoes.append(cinza)
 
-    # 1. CLAHE - Melhoria de Contraste Local
-    clahe = cv2.createCLAHE(clipLimit=3.5, tileGridSize=(8, 8))
+    # CLAHE Agressivo
+    clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
     img_clahe = clahe.apply(cinza)
     variacoes.append(img_clahe)
 
-    # 2. Desruído + Threshold Adaptativo (Para fotos com sombra/pouca luz)
-    denoised = cv2.fastNlMeansDenoising(cinza, h=10)
-    adaptive_thresh = cv2.adaptiveThreshold(denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-    variacoes.append(adaptive_thresh)
+    # Threshold Otsu Normal e Invertido (Para etiquetas pretas/escuras)
+    _, otsu = cv2.threshold(cinza, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    variacoes.append(otsu)
+    variacoes.append(cv2.bitwise_not(otsu))
 
-    # 3. Nitidez Sharp
-    kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
-    nitida = cv2.filter2D(cinza, -1, kernel)
-    variacoes.append(nitida)
+    # Adaptive Thresholding com Desruído
+    denoised = cv2.fastNlMeansDenoising(cinza, h=8)
+    adaptive_thresh = cv2.adaptiveThreshold(denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 13, 2)
+    variacoes.append(adaptive_thresh)
 
     return variacoes
 
@@ -395,11 +396,19 @@ def tentar_ocr_extremo(img_np):
     codigos = set()
     if not HAS_OCR or img_np is None: return codigos
     try:
+        # Permite confiança mais baixa (0.10) para pegar imagens muito borradas
         res = OCR_READER.readtext(img_np, allowlist='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-')
         for bbox, texto, confianca in res:
-            if confianca > 0.25: # Filtra OCR com baixa confiança
-                texto_corr = (texto.replace('O', '0').replace('I', '1').replace('L', '1')
-                              .replace('Z', '2').replace('S', '5').replace('B', '8').replace('G', '6'))
+            if confianca > 0.10: 
+                # Dicionário Estendido de Correções Numéricas para OCR
+                texto_corr = (texto.upper()
+                              .replace('O', '0').replace('Q', '0')
+                              .replace('I', '1').replace('L', '1').replace('|', '1')
+                              .replace('Z', '2')
+                              .replace('E', '3')
+                              .replace('A', '4')
+                              .replace('S', '5')
+                              .replace('G', '6').replace('B', '8'))
                 c = limpar_texto_codigo(texto_corr)
                 if c and len(c) >= 3: codigos.add(c)
     except Exception: pass
@@ -407,50 +416,59 @@ def tentar_ocr_extremo(img_np):
 
 def ler_imagem_todas_camadas(cv_img, nome_arquivo):
     codigos_encontrados = set()
+    
+    # 1. Pega do nome do arquivo
     digs_nome = extrair_apenas_digitos(nome_arquivo)
-    if digs_nome and len(digs_nome) >= 4:
+    if digs_nome and len(digs_nome) >= 3:
         codigos_encontrados.add(digs_nome)
 
     if cv_img is None: return list(codigos_encontrados)
 
-    orientacoes = [
-        cv_img,
-        cv2.rotate(cv_img, cv2.ROTATE_90_CLOCKWISE),
-        cv2.rotate(cv_img, cv2.ROTATE_180),
-        cv2.rotate(cv_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
-    ]
+    # 2. Pega recortes da Imagem (Centro + Imagem Completa) para evitar poluição da borda
+    h, w = cv_img.shape[:2]
+    crop_center = cv_img[int(h*0.1):int(h*0.9), int(w*0.1):int(w*0.9)]
+    
+    regioes = [cv_img, crop_center]
 
-    for img_rot in orientacoes:
-        variacoes = gerar_variacoes_imagem_alta_precisao(img_rot)
-        for var in variacoes:
-            cods = tentar_decodificar_leitores(var)
-            if cods: codigos_encontrados.update(cods)
+    orientacoes = [0, 90, 180, 270]
 
-        if codigos_encontrados: break
+    for reg in regioes:
+        for angulo in orientacoes:
+            if angulo == 90: img_rot = cv2.rotate(reg, cv2.ROTATE_90_CLOCKWISE)
+            elif angulo == 180: img_rot = cv2.rotate(reg, cv2.ROTATE_180)
+            elif angulo == 270: img_rot = cv2.rotate(reg, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            else: img_rot = reg
 
-        if HAS_OCR:
-            for var in variacoes[:3]:
-                cods_ocr = tentar_ocr_extremo(var)
-                if cods_ocr: codigos_encontrados.update(cods_ocr)
-            if codigos_encontrados: break
+            variacoes = gerar_variacoes_imagem_super_ocr(img_rot)
+            
+            # Leitura de Códigos de Barras
+            for var in variacoes:
+                cods = tentar_decodificar_leitores(var)
+                if cods: codigos_encontrados.update(cods)
+
+            # OCR Texto
+            if HAS_OCR:
+                for var in variacoes:
+                    cods_ocr = tentar_ocr_extremo(var)
+                    if cods_ocr: codigos_encontrados.update(cods_ocr)
 
     return list(codigos_encontrados)
 
-def calcular_similaridade_rigorosa(digitos_excel, texto_foto_completo, digitos_foto_lista):
-    if not digitos_excel or len(digitos_excel) < 3: 
+def calcular_similaridade_ultra(digitos_excel, texto_foto_completo, digitos_foto_lista):
+    if not digitos_excel or len(digitos_excel) < 2: 
         return 0.0
 
     digs_foto_concat = "".join(digitos_foto_lista) + extrair_apenas_digitos(texto_foto_completo)
 
-    # 1. Correspondência Exata
-    if digitos_excel == digs_foto_concat or digitos_excel in digitos_foto_lista: 
+    # 1. Busca Exata
+    if digitos_excel in digitos_foto_lista or digitos_excel == digs_foto_concat: 
         return 1.0
 
-    # 2. Substring perfeita dentro dos dados lidos da foto
+    # 2. Substring (Código do Excel está contido totalmente nos dígitos achados)
     if digitos_excel in digs_foto_concat:
         return 0.95
 
-    # 3. Comparação Sequencial com Fuzzy Match Estrito
+    # 3. Fuzzy Match Flexível
     tam_ex = len(digitos_excel)
     if len(digs_foto_concat) >= tam_ex:
         melhor_ratio = 0.0
@@ -459,7 +477,7 @@ def calcular_similaridade_rigorosa(digitos_excel, texto_foto_completo, digitos_f
             ratio = SequenceMatcher(None, digitos_excel, sub).ratio()
             if ratio > melhor_ratio: 
                 melhor_ratio = ratio
-        if melhor_ratio >= 0.88: 
+        if melhor_ratio >= 0.70: # Reduzido limiar para pegar divergências pequenas
             return melhor_ratio
 
     return 0.0
@@ -549,7 +567,7 @@ with tab_ferramenta:
             with container_status:
                 status_leitura = st.empty()
                 prog_bar = st.progress(0)
-                status_leitura.write(f"🔍 Analisando {len(lista_fotos)} imagens com IA e Leitura de Alta Precisão...")
+                status_leitura.write(f"🔍 Escaneamento Profundo das {len(lista_fotos)} fotos... Por favor aguarde.")
 
                 for idx, (nome_f, pil_img, img_bytes) in enumerate(lista_fotos):
                     np_arr = np.frombuffer(img_bytes, np.uint8)
@@ -566,43 +584,34 @@ with tab_ferramenta:
                     prog_bar.progress((idx + 1) / len(lista_fotos))
                 prog_bar.empty()
 
-            # Mapeia os códigos do Excel normalizados (sem zeros à esquerda)
+            # Normalização dos Códigos do Excel
             codigos_excel_dict = {extrair_apenas_digitos(val): val for val in df_temp[coluna_sgp].dropna().unique() if extrair_apenas_digitos(val)}
 
-            # PASSO 1: VÍNCULO EXATO / ALTA PRECISÃO (Score >= 0.95)
+            # PASSO 1: VÍNCULO EXATO / ALTA CONFIANÇA (Score >= 0.90)
             for cod_excel, val_raw in codigos_excel_dict.items():
                 for foto in banco_fotos:
                     if foto["usada"]: continue
-                    score = calcular_similaridade_rigorosa(cod_excel, foto["nome"], foto["digitos_list"])
-                    if score >= 0.95:
+                    score = calcular_similaridade_ultra(cod_excel, foto["nome"], foto["digitos_list"])
+                    if score >= 0.90:
                         st.session_state.mapa_codigo_imagem[cod_excel] = foto["pil_img"]
                         foto["usada"] = True
                         break
 
-            # PASSO 2: FUZZY MATCH CONTROLADO E ANTI-AMBIGUIDADE (Score >= 0.88)
+            # PASSO 2: MODO BUSCA EXPANSIVA PARA PEGAR RESTANTES (Score >= 0.70)
             for cod_excel, val_raw in codigos_excel_dict.items():
                 if cod_excel in st.session_state.mapa_codigo_imagem: continue
-                candidatos = []
+                melhor_score, melhor_foto = 0.0, None
                 for foto in banco_fotos:
                     if foto["usada"]: continue
-                    score = calcular_similaridade_rigorosa(cod_excel, foto["nome"], foto["digitos_list"])
-                    if score >= 0.88:
-                        candidatos.append((score, foto))
+                    score = calcular_similaridade_ultra(cod_excel, foto["nome"], foto["digitos_list"])
+                    if score > melhor_score and score >= 0.70:
+                        melhor_score, melhor_foto = score, foto
 
-                # Se houver apenas 1 candidato ideal ou um vencedor muito claro, faz a atribuição
-                if len(candidatos) == 1:
-                    melhor_foto = candidatos[0][1]
+                if melhor_foto is not None:
                     st.session_state.mapa_codigo_imagem[cod_excel] = melhor_foto["pil_img"]
                     melhor_foto["usada"] = True
-                elif len(candidatos) > 1:
-                    candidatos.sort(key=lambda x: x[0], reverse=True)
-                    # Só escolhe se o 1º colocado tiver uma margem de segurança relevante sobre o 2º
-                    if candidatos[0][0] - candidatos[1][0] >= 0.10:
-                        melhor_foto = candidatos[0][1]
-                        st.session_state.mapa_codigo_imagem[cod_excel] = melhor_foto["pil_img"]
-                        melhor_foto["usada"] = True
 
-            st.success(f"🎉 Processamento concluído! {len(st.session_state.mapa_codigo_imagem)} fotos vinculadas com alta precisão.")
+            st.success(f"🎉 Processamento concluído! {len(st.session_state.mapa_codigo_imagem)} fotos vinculadas com sucesso.")
             st.rerun()
 
         if "mapa_codigo_imagem" in st.session_state and len(st.session_state.mapa_codigo_imagem) > 0:
