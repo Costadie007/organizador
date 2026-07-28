@@ -3,7 +3,6 @@ import math
 import os
 import re
 import sqlite3
-import urllib.parse
 import zipfile
 from difflib import SequenceMatcher
 
@@ -26,7 +25,7 @@ def init_db():
             usuario TEXT PRIMARY KEY,
             senha TEXT NOT NULL,
             nome_completo TEXT,
-            contato TEXT,
+            email TEXT,
             status TEXT DEFAULT 'pendente',
             role TEXT DEFAULT 'user',
             data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -35,9 +34,9 @@ def init_db():
     c.execute("SELECT * FROM usuarios WHERE usuario = ?", ("diego.costa",))
     if not c.fetchone():
         c.execute('''
-            INSERT INTO usuarios (usuario, senha, nome_completo, contato, status, role)
+            INSERT INTO usuarios (usuario, senha, nome_completo, email, status, role)
             VALUES (?, ?, ?, ?, ?, ?)
-        ''', ("diego.costa", "admin123", "Diego Costa", "5500000000000", "aprovado", "admin"))
+        ''', ("diego.costa", "admin123", "Diego Costa", "admin@empresa.com", "aprovado", "admin"))
     conn.commit()
     conn.close()
 
@@ -46,7 +45,7 @@ init_db()
 def buscar_usuario(usuario):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT usuario, senha, nome_completo, contato, status, role FROM usuarios WHERE usuario = ?", (usuario.lower().strip(),))
+    c.execute("SELECT usuario, senha, nome_completo, email, status, role FROM usuarios WHERE usuario = ?", (usuario.lower().strip(),))
     row = c.fetchone()
     conn.close()
     if row:
@@ -54,26 +53,38 @@ def buscar_usuario(usuario):
             "usuario": row[0],
             "senha": row[1],
             "nome_completo": row[2],
-            "contato": row[3],
+            "email": row[3],
             "status": row[4],
             "role": row[5]
         }
     return None
 
-def cadastrar_usuario(usuario, senha, nome, contato):
+def cadastrar_usuario(usuario, senha, nome, email):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     try:
         c.execute('''
-            INSERT INTO usuarios (usuario, senha, nome_completo, contato, status, role)
+            INSERT INTO usuarios (usuario, senha, nome_completo, email, status, role)
             VALUES (?, ?, ?, ?, 'pendente', 'user')
-        ''', (usuario.lower().strip(), senha, nome, contato))
+        ''', (usuario.lower().strip(), senha, nome, email.lower().strip()))
         conn.commit()
         conn.close()
         return True, "Cadastro realizado com sucesso! Aguarde a aprovação do administrador."
     except sqlite3.IntegrityError:
         conn.close()
         return False, "Este nome de usuário já está cadastrado. Escolha outro."
+
+def redefinir_senha_db(usuario, email, nova_senha):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT usuario FROM usuarios WHERE usuario = ? AND LOWER(email) = ?", (usuario.lower().strip(), email.lower().strip()))
+    if c.fetchone():
+        c.execute("UPDATE usuarios SET senha = ? WHERE usuario = ?", (nova_senha, usuario.lower().strip()))
+        conn.commit()
+        conn.close()
+        return True, "Senha redefinida com sucesso! Você já pode fazer login."
+    conn.close()
+    return False, "Usuário ou E-mail não encontrados/compatíveis."
 
 def atualizar_status_db(usuario, novo_status):
     conn = sqlite3.connect(DB_NAME)
@@ -87,7 +98,7 @@ def atualizar_status_db(usuario, novo_status):
 
 def listar_todos_usuarios():
     conn = sqlite3.connect(DB_NAME)
-    df = pd.read_sql_query("SELECT usuario, nome_completo, contato, status, role, data_cadastro FROM usuarios", conn)
+    df = pd.read_sql_query("SELECT usuario, nome_completo, email, status, role, data_cadastro FROM usuarios", conn)
     conn.close()
     return df
 
@@ -126,7 +137,6 @@ COR_LARANJA = "#F39200"
 
 st.markdown(f"""
     <style>
-    /* Ocultar elementos padrão do Streamlit */
     [data-testid="stToolbar"], [data-testid="stHeader"], header, #MainMenu {{
         display: none !important;
         visibility: hidden !important;
@@ -152,7 +162,6 @@ st.markdown(f"""
         max-width: 90%;
     }}
     
-    /* Card de Métricas estilo Painel do Lote */
     .metric-box {{
         background-color: {COR_CARD};
         border-radius: 8px;
@@ -175,7 +184,6 @@ st.markdown(f"""
         letter-spacing: 0.5px;
     }}
     
-    /* Cabeçalho do Estilo Tabela para Administrador */
     .table-header {{
         background-color: {COR_CARD};
         padding: 10px 15px;
@@ -184,11 +192,6 @@ st.markdown(f"""
         color: {COR_LARANJA};
         margin-bottom: 8px;
         border: 1px solid rgba(255, 255, 255, 0.05);
-    }}
-    .table-row {{
-        padding: 8px 15px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        align-items: center;
     }}
 
     .stButton>button {{
@@ -214,12 +217,10 @@ if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 if "usuario_logado" not in st.session_state:
     st.session_state.usuario_logado = None
-if "mensagem_aprovacao" not in st.session_state:
-    st.session_state.mensagem_aprovacao = None
 
 if not st.session_state.autenticado:
     st.markdown("<br><br>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 1.6, 1])
+    c1, c2, c3 = st.columns([1, 1.8, 1])
 
     with c2:
         st.markdown(f"""
@@ -229,7 +230,7 @@ if not st.session_state.autenticado:
             </div>
         """, unsafe_allow_html=True)
 
-        tab_login, tab_cadastro = st.tabs(["🔒 Acessar Conta", "📝 Solicitar Cadastro"])
+        tab_login, tab_cadastro, tab_esqueci = st.tabs(["🔒 Acessar Conta", "📝 Solicitar Cadastro", "🔑 Esqueci a Senha"])
 
         with tab_login:
             with st.form("form_login"):
@@ -253,18 +254,38 @@ if not st.session_state.autenticado:
 
         with tab_cadastro:
             with st.form("form_cadastro"):
-                novo_usr = st.text_input("Usuário").strip().lower()
+                novo_usr = st.text_input("Usuário Desejado").strip().lower()
                 nova_senha = st.text_input("Senha", type="password")
                 nome_comp = st.text_input("Nome Completo")
-                contato_wa = st.text_input("WhatsApp com DDD (Ex: 11999998888)")
+                email_usr = st.text_input("E-mail Comercial/Pessoal")
                 btn_cadastrar = st.form_submit_button("Enviar Solicitação", use_container_width=True)
 
                 if btn_cadastrar:
-                    if not novo_usr or not nova_senha or not nome_comp or not contato_wa:
-                        st.error("Preencha todos os campos.")
+                    if not novo_usr or not nova_senha or not nome_comp or not email_usr:
+                        st.error("Preencha todos os campos do formulário.")
+                    elif "@" not in email_usr:
+                        st.error("Por favor, informe um endereço de e-mail válido.")
                     else:
-                        sucesso, msg = cadastrar_usuario(novo_usr, nova_senha, nome_comp, contato_wa)
+                        sucesso, msg = cadastrar_usuario(novo_usr, nova_senha, nome_comp, email_usr)
                         if sucesso:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
+
+        with tab_esqueci:
+            with st.form("form_esqueci"):
+                st.caption("Informe seu usuário e o e-mail cadastrado para redefinir a senha.")
+                usr_rec = st.text_input("Usuário").strip().lower()
+                email_rec = st.text_input("E-mail Cadastrado").strip().lower()
+                nova_senha_rec = st.text_input("Nova Senha", type="password")
+                btn_redefinir = st.form_submit_button("Redefinir Senha", use_container_width=True)
+
+                if btn_redefinir:
+                    if not usr_rec or not email_rec or not nova_senha_rec:
+                        st.error("Preencha todos os campos para redefinir.")
+                    else:
+                        ok, msg = redefinir_senha_db(usr_rec, email_rec, nova_senha_rec)
+                        if ok:
                             st.success(msg)
                         else:
                             st.error(msg)
@@ -277,6 +298,7 @@ e_admin = (usr_atual["usuario"] == "diego.costa") or (usr_atual.get("role") == "
 with st.sidebar:
     st.markdown(f"👤 **{usr_atual['nome_completo']}**")
     st.caption(f"Usuário: `{usr_atual['usuario']}`")
+    st.caption(f"E-mail: `{usr_atual.get('email', 'N/A')}`")
     st.markdown("---")
     if st.button("🚪 Sair", use_container_width=True):
         st.session_state.autenticado = False
@@ -357,7 +379,7 @@ def tentar_ocr_extremo(img_np):
     try:
         res = OCR_READER.readtext(img_np, allowlist='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-')
         for bbox, texto, confianca in res:
-            if confianca > 0.15:
+            if confianca > 0.20:
                 texto_corr = (texto.replace('O', '0').replace('I', '1').replace('L', '1')
                               .replace('Z', '2').replace('S', '5').replace('B', '8').replace('G', '6'))
                 c = limpar_texto_codigo(texto_corr)
@@ -397,25 +419,24 @@ def ler_imagem_todas_camadas(cv_img, nome_arquivo):
     return list(codigos_encontrados)
 
 def calcular_similaridade_avancada(digitos_excel, texto_foto_completo, digitos_foto_lista):
-    if not digitos_excel: return 0.0
+    if not digitos_excel or len(digitos_excel) < 4: 
+        return 0.0
+
     digs_foto_concat = "".join(digitos_foto_lista) + extrair_apenas_digitos(texto_foto_completo)
 
-    if digitos_excel in digs_foto_concat: return 1.0
+    if digitos_excel in digs_foto_concat: 
+        return 1.0
 
     tam_ex = len(digitos_excel)
-    if tam_ex >= 4 and len(digs_foto_concat) >= tam_ex:
+    if len(digs_foto_concat) >= tam_ex:
         melhor_ratio = 0.0
         for i in range(len(digs_foto_concat) - tam_ex + 1):
             sub = digs_foto_concat[i:i+tam_ex]
             ratio = SequenceMatcher(None, digitos_excel, sub).ratio()
-            if ratio > melhor_ratio: melhor_ratio = ratio
-        if melhor_ratio >= 0.75: return melhor_ratio
-
-    if tam_ex >= 4:
-        sufixo_4 = digitos_excel[-4:]
-        sufixo_6 = digitos_excel[-6:] if tam_ex >= 6 else sufixo_4
-        if sufixo_6 in digs_foto_concat: return 0.90
-        if sufixo_4 in digs_foto_concat: return 0.75
+            if ratio > melhor_ratio: 
+                melhor_ratio = ratio
+        if melhor_ratio >= 0.85: 
+            return melhor_ratio
 
     return SequenceMatcher(None, digitos_excel, digs_foto_concat).ratio()
 
@@ -540,7 +561,7 @@ with tab_ferramenta:
                 for foto in banco_fotos:
                     if foto["usada"]: continue
                     score = calcular_similaridade_avancada(cod_excel, foto["nome"], foto["digitos_list"])
-                    if score > melhor_score and score >= 0.45:
+                    if score > melhor_score and score >= 0.80:
                         melhor_score, melhor_foto = score, foto
 
                 if melhor_foto is not None:
@@ -548,7 +569,7 @@ with tab_ferramenta:
                     melhor_foto["usada"] = True
                     vincularam_fuzzy += 1
 
-            st.success(f"🎉 Processamento concluído! {len(st.session_state.mapa_codigo_imagem)} fotos vinculadas com sucesso.")
+            st.success(f"🎉 Processamento concluído! {len(st.session_state.mapa_codigo_imagem)} fotos vinculadas com precisão.")
             st.rerun()
 
         if "mapa_codigo_imagem" in st.session_state and len(st.session_state.mapa_codigo_imagem) > 0:
@@ -571,7 +592,6 @@ with tab_ferramenta:
                 col_idx_foto = ws.max_column + 1
                 ws.cell(row=1, column=col_idx_foto).value = nome_coluna_foto
 
-                # Configurações de dimensão padronizada para as fotos no Excel
                 LARGURA_FOTO_PX = 160
                 ALTURA_FOTO_PX = 80
                 ALTURA_LINHA_EXCEL = 65
@@ -586,7 +606,6 @@ with tab_ferramenta:
                     if cod_num and cod_num in st.session_state.mapa_codigo_imagem:
                         pil_img = st.session_state.mapa_codigo_imagem[cod_num].copy()
                         
-                        # Padroniza dimensão da imagem mantendo a proporção de forma nítida
                         pil_img.thumbnail((LARGURA_FOTO_PX, ALTURA_FOTO_PX), Image.LANCZOS)
                         
                         img_byte_arr = io.BytesIO()
@@ -641,7 +660,6 @@ with tab_ferramenta:
                                     img_b = mapa_fotos_linha[l_orig]
                                     img_b.seek(0)
                                     
-                                    # Ajuste padronizado para as partes divididas
                                     pil_p = Image.open(img_b)
                                     img_excel_p = OpenpyxlImage(img_b)
                                     img_excel_p.width = pil_p.width
@@ -664,72 +682,41 @@ with tab_ferramenta:
 if e_admin and tab_admin:
     with tab_admin:
         st.markdown("<div style='font-size: 20px; font-weight: bold; color: #FFFFFF; margin-bottom: 12px;'>👑 Gestão de Usuários e Aprovações</div>", unsafe_allow_html=True)
-        
-        # Alerta com botão para WhatsApp
-        if st.session_state.mensagem_aprovacao:
-            st.success(st.session_state.mensagem_aprovacao["texto"])
-            st.markdown(f"""
-                <a href="{st.session_state.mensagem_aprovacao['link_wa']}" target="_blank" style="
-                    display: inline-block;
-                    background-color: #25D366;
-                    color: white;
-                    padding: 8px 16px;
-                    text-decoration: none;
-                    border-radius: 6px;
-                    font-weight: bold;
-                    margin-bottom: 15px;">
-                    💬 Enviar Notificação via WhatsApp
-                </a>
-            """, unsafe_allow_html=True)
-            if st.button("Fechar Notificação"):
-                st.session_state.mensagem_aprovacao = None
-                st.rerun()
 
         df_usuarios = listar_todos_usuarios()
 
-        # Cabeçalho no Estilo Tabela
-        c_nome, c_usr, c_contato, c_status, c_role, c_acao = st.columns([2.5, 1.8, 1.8, 1.2, 1, 2.2])
+        c_nome, c_usr, c_email, c_status, c_role, c_acao = st.columns([2.5, 1.8, 2.2, 1.2, 1, 2.2])
         c_nome.markdown("<div class='table-header'>Nome Completo</div>", unsafe_allow_html=True)
         c_usr.markdown("<div class='table-header'>Usuário</div>", unsafe_allow_html=True)
-        c_contato.markdown("<div class='table-header'>Contato</div>", unsafe_allow_html=True)
+        c_email.markdown("<div class='table-header'>E-mail</div>", unsafe_allow_html=True)
         c_status.markdown("<div class='table-header'>Status</div>", unsafe_allow_html=True)
         c_role.markdown("<div class='table-header'>Função</div>", unsafe_allow_html=True)
         c_acao.markdown("<div class='table-header'>Ação</div>", unsafe_allow_html=True)
 
-        # Linhas da Tabela
         for idx, user in df_usuarios.iterrows():
-            col1, col2, col3, col4, col5, col6 = st.columns([2.5, 1.8, 1.8, 1.2, 1, 2.2])
+            col1, col2, col3, col4, col5, col6 = st.columns([2.5, 1.8, 2.2, 1.2, 1, 2.2])
             
             col1.write(f"**{user['nome_completo']}**")
             col2.write(f"`{user['usuario']}`")
-            col3.write(f"{user['contato']}")
+            col3.write(f"{user.get('email', '-')}")
             
             status_tag = "🟢 Aprovado" if user['status'] == 'aprovado' else "⏳ Pendente"
             col4.write(status_tag)
             col5.write(f"`{user['role']}`")
 
-            # Coluna de Ações em linha
             with col6:
                 if user['status'] == 'pendente':
                     btn_col1, btn_col2 = st.columns(2)
                     
-                    num_limpo = re.sub(r'\D', '', str(user['contato']))
-                    msg = urllib.parse.quote(f"Olá {user['nome_completo']}! Seu cadastro no Organizador de Planilhas foi APROVADO com sucesso. Você já pode fazer login e acessar o sistema!")
-                    link_wa = f"https://wa.me/{num_limpo}?text={msg}"
-
-                    if btn_col1.button("✅", key=f"ap_{user['usuario']}", help="Aprovar Usuário"):
+                    if btn_col1.button("✅ Aprovar", key=f"ap_{user['usuario']}", help="Aprovar Acesso do Usuário"):
                         atualizar_status_db(user['usuario'], 'aprovado')
-                        st.session_state.mensagem_aprovacao = {
-                            "texto": f"Usuário **{user['nome_completo']}** aprovado!",
-                            "link_wa": link_wa
-                        }
+                        st.success(f"Usuário {user['usuario']} aprovado!")
                         st.rerun()
                         
-                    if btn_col2.button("🚫", key=f"rec_{user['usuario']}", help="Recusar Solicitação"):
+                    if btn_col2.button("🚫 Recusar", key=f"rec_{user['usuario']}", help="Recusar e Excluir Solicitação"):
                         atualizar_status_db(user['usuario'], 'excluir')
                         st.rerun()
                 else:
-                    # Para usuários já aprovados/cadastrados
                     if user['usuario'] != "diego.costa":
                         if st.button("🗑️ Excluir", key=f"del_{user['usuario']}", help="Excluir Usuário do Banco de Dados"):
                             atualizar_status_db(user['usuario'], 'excluir')
