@@ -20,7 +20,6 @@ DB_NAME = "sistema_usuarios.db"
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    # Cria a tabela se for um banco novo
     c.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
             usuario TEXT PRIMARY KEY,
@@ -33,7 +32,7 @@ def init_db():
         )
     ''')
     
-    # MIGRAÇÃO AUTOMÁTICA: Adiciona a coluna 'email' se a tabela já existia sem ela
+    # MIGRAÇÃO AUTOMÁTICA
     c.execute("PRAGMA table_info(usuarios)")
     colunas = [col[1] for col in c.fetchall()]
     if "email" not in colunas:
@@ -331,10 +330,12 @@ with col_titulo:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# --- FUNÇÕES DE LEITURA E PROCESSAMENTO ---
+# --- FUNÇÕES DE LEITURA E PROCESSAMENTO AVANÇADO ---
 def extrair_apenas_digitos(texto):
     if texto is None: return ""
-    return str(re.sub(r'\D', '', str(texto)))
+    digits = re.sub(r'\D', '', str(texto))
+    # Normalização Alta Precisão: Remove zeros à esquerda (ex: 00123 -> 123)
+    return digits.lstrip('0')
 
 def limpar_texto_codigo(codigo_bruto):
     if not codigo_bruto: return None
@@ -342,26 +343,35 @@ def limpar_texto_codigo(codigo_bruto):
     limpo = re.sub(r'[^a-zA-Z0-9]', '', limpo)
     return limpo if len(limpo) >= 3 else None
 
-def gerar_variacoes_imagem(cv_img):
+def gerar_variacoes_imagem_alta_precisao(cv_img):
     variacoes = []
     if cv_img is None: return variacoes
     h, w = cv_img.shape[:2]
-    if max(h, w) > 1800:
-        escala = 1800 / max(h, w)
+    
+    # Redimensiona mantendo proporção ideal para OCR
+    if max(h, w) > 2000:
+        escala = 2000 / max(h, w)
         cv_img = cv2.resize(cv_img, (int(w * escala), int(h * escala)), interpolation=cv2.INTER_AREA)
 
     variacoes.append(cv_img)
     cinza = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY) if len(cv_img.shape) == 3 else cv_img
     variacoes.append(cinza)
 
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    variacoes.append(clahe.apply(cinza))
+    # 1. CLAHE - Melhoria de Contraste Local
+    clahe = cv2.createCLAHE(clipLimit=3.5, tileGridSize=(8, 8))
+    img_clahe = clahe.apply(cinza)
+    variacoes.append(img_clahe)
 
-    nitida = cv2.filter2D(cinza, -1, np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]]))
+    # 2. Desruído + Threshold Adaptativo (Para fotos com sombra/pouca luz)
+    denoised = cv2.fastNlMeansDenoising(cinza, h=10)
+    adaptive_thresh = cv2.adaptiveThreshold(denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    variacoes.append(adaptive_thresh)
+
+    # 3. Nitidez Sharp
+    kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+    nitida = cv2.filter2D(cinza, -1, kernel)
     variacoes.append(nitida)
 
-    _, otsu = cv2.threshold(cinza, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    variacoes.append(otsu)
     return variacoes
 
 def tentar_decodificar_leitores(img_np):
@@ -387,7 +397,7 @@ def tentar_ocr_extremo(img_np):
     try:
         res = OCR_READER.readtext(img_np, allowlist='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-')
         for bbox, texto, confianca in res:
-            if confianca > 0.20:
+            if confianca > 0.25: # Filtra OCR com baixa confiança
                 texto_corr = (texto.replace('O', '0').replace('I', '1').replace('L', '1')
                               .replace('Z', '2').replace('S', '5').replace('B', '8').replace('G', '6'))
                 c = limpar_texto_codigo(texto_corr)
@@ -411,7 +421,7 @@ def ler_imagem_todas_camadas(cv_img, nome_arquivo):
     ]
 
     for img_rot in orientacoes:
-        variacoes = gerar_variacoes_imagem(img_rot)
+        variacoes = gerar_variacoes_imagem_alta_precisao(img_rot)
         for var in variacoes:
             cods = tentar_decodificar_leitores(var)
             if cods: codigos_encontrados.update(cods)
@@ -426,15 +436,21 @@ def ler_imagem_todas_camadas(cv_img, nome_arquivo):
 
     return list(codigos_encontrados)
 
-def calcular_similaridade_avancada(digitos_excel, texto_foto_completo, digitos_foto_lista):
-    if not digitos_excel or len(digitos_excel) < 4: 
+def calcular_similaridade_rigorosa(digitos_excel, texto_foto_completo, digitos_foto_lista):
+    if not digitos_excel or len(digitos_excel) < 3: 
         return 0.0
 
     digs_foto_concat = "".join(digitos_foto_lista) + extrair_apenas_digitos(texto_foto_completo)
 
-    if digitos_excel in digs_foto_concat: 
+    # 1. Correspondência Exata
+    if digitos_excel == digs_foto_concat or digitos_excel in digitos_foto_lista: 
         return 1.0
 
+    # 2. Substring perfeita dentro dos dados lidos da foto
+    if digitos_excel in digs_foto_concat:
+        return 0.95
+
+    # 3. Comparação Sequencial com Fuzzy Match Estrito
     tam_ex = len(digitos_excel)
     if len(digs_foto_concat) >= tam_ex:
         melhor_ratio = 0.0
@@ -443,10 +459,10 @@ def calcular_similaridade_avancada(digitos_excel, texto_foto_completo, digitos_f
             ratio = SequenceMatcher(None, digitos_excel, sub).ratio()
             if ratio > melhor_ratio: 
                 melhor_ratio = ratio
-        if melhor_ratio >= 0.85: 
+        if melhor_ratio >= 0.88: 
             return melhor_ratio
 
-    return SequenceMatcher(None, digitos_excel, digs_foto_concat).ratio()
+    return 0.0
 
 # --- 6. ABAS PRINCIPAIS ---
 if e_admin:
@@ -533,7 +549,7 @@ with tab_ferramenta:
             with container_status:
                 status_leitura = st.empty()
                 prog_bar = st.progress(0)
-                status_leitura.write(f"🔍 Analisando {len(lista_fotos)} imagens com IA e Leitura de Códigos...")
+                status_leitura.write(f"🔍 Analisando {len(lista_fotos)} imagens com IA e Leitura de Alta Precisão...")
 
                 for idx, (nome_f, pil_img, img_bytes) in enumerate(lista_fotos):
                     np_arr = np.frombuffer(img_bytes, np.uint8)
@@ -550,34 +566,43 @@ with tab_ferramenta:
                     prog_bar.progress((idx + 1) / len(lista_fotos))
                 prog_bar.empty()
 
-            vincularam_auto = 0
+            # Mapeia os códigos do Excel normalizados (sem zeros à esquerda)
             codigos_excel_dict = {extrair_apenas_digitos(val): val for val in df_temp[coluna_sgp].dropna().unique() if extrair_apenas_digitos(val)}
 
+            # PASSO 1: VÍNCULO EXATO / ALTA PRECISÃO (Score >= 0.95)
             for cod_excel, val_raw in codigos_excel_dict.items():
                 for foto in banco_fotos:
                     if foto["usada"]: continue
-                    if calcular_similaridade_avancada(cod_excel, foto["nome"], foto["digitos_list"]) >= 0.85:
+                    score = calcular_similaridade_rigorosa(cod_excel, foto["nome"], foto["digitos_list"])
+                    if score >= 0.95:
                         st.session_state.mapa_codigo_imagem[cod_excel] = foto["pil_img"]
                         foto["usada"] = True
-                        vincularam_auto += 1
                         break
 
-            vincularam_fuzzy = 0
+            # PASSO 2: FUZZY MATCH CONTROLADO E ANTI-AMBIGUIDADE (Score >= 0.88)
             for cod_excel, val_raw in codigos_excel_dict.items():
                 if cod_excel in st.session_state.mapa_codigo_imagem: continue
-                melhor_score, melhor_foto = 0.0, None
+                candidatos = []
                 for foto in banco_fotos:
                     if foto["usada"]: continue
-                    score = calcular_similaridade_avancada(cod_excel, foto["nome"], foto["digitos_list"])
-                    if score > melhor_score and score >= 0.80:
-                        melhor_score, melhor_foto = score, foto
+                    score = calcular_similaridade_rigorosa(cod_excel, foto["nome"], foto["digitos_list"])
+                    if score >= 0.88:
+                        candidatos.append((score, foto))
 
-                if melhor_foto is not None:
+                # Se houver apenas 1 candidato ideal ou um vencedor muito claro, faz a atribuição
+                if len(candidatos) == 1:
+                    melhor_foto = candidatos[0][1]
                     st.session_state.mapa_codigo_imagem[cod_excel] = melhor_foto["pil_img"]
                     melhor_foto["usada"] = True
-                    vincularam_fuzzy += 1
+                elif len(candidatos) > 1:
+                    candidatos.sort(key=lambda x: x[0], reverse=True)
+                    # Só escolhe se o 1º colocado tiver uma margem de segurança relevante sobre o 2º
+                    if candidatos[0][0] - candidatos[1][0] >= 0.10:
+                        melhor_foto = candidatos[0][1]
+                        st.session_state.mapa_codigo_imagem[cod_excel] = melhor_foto["pil_img"]
+                        melhor_foto["usada"] = True
 
-            st.success(f"🎉 Processamento concluído! {len(st.session_state.mapa_codigo_imagem)} fotos vinculadas com precisão.")
+            st.success(f"🎉 Processamento concluído! {len(st.session_state.mapa_codigo_imagem)} fotos vinculadas com alta precisão.")
             st.rerun()
 
         if "mapa_codigo_imagem" in st.session_state and len(st.session_state.mapa_codigo_imagem) > 0:
